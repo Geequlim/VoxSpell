@@ -1,0 +1,30 @@
+{
+	"name": "@voxspell/protocol",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"sideEffects": false,
+	"exports": {
+		"./capabilities": "./src/capabilities.ts",
+		"./common": "./src/common.ts",
+		"./daemon": "./src/daemon.ts",
+		"./errors": "./src/errors.ts",
+		"./initialize": "./src/initialize.ts",
+		"./polish": "./src/polish.ts",
+		"./session": "./src/session.ts",
+		"./transcript": "./src/transcript.ts",
+		"./validation": "./src/validation.ts"
+	},
+	"dependencies": {
+		"@sinclair/typebox": "0.34.52",
+		"vscode-jsonrpc": "9.0.1"
+	},
+	"devDependencies": {
+		"@types/node": "24.13.3",
+		"typescript": "7.0.2",
+		"vitest": "4.1.10"
+	},
+	"engines": {
+		"node": ">=24"
+	}
+}

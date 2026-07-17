@@ -1,3 +1,3 @@
 export function createStartupMessage(): string {
-	return "VoxSpell daemon started";
+	return 'VoxSpell daemon started';
 }

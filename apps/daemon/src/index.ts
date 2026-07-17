@@ -1,3 +1,3 @@
-import { createStartupMessage } from "./app.js";
+import { createStartupMessage } from './app.js';
 
 console.log(createStartupMessage());
