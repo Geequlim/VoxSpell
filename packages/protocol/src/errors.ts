@@ -2,8 +2,7 @@ import { Type } from '@sinclair/typebox';
 
 import type { Static } from '@sinclair/typebox';
 
-export const SERVER_ERROR_CODE_MIN = -32099;
-export const SERVER_ERROR_CODE_MAX = -32000;
+export const DAEMON_ERROR_CODE = -33000;
 
 export const ProtocolErrorCodeSchema = Type.Union([
 	Type.Literal('MESSAGE_TOO_LARGE'),

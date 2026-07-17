@@ -4,7 +4,8 @@
 	"private": true,
 	"type": "module",
 	"dependencies": {
-		"@voxspell/protocol": "workspace:^"
+		"@voxspell/protocol": "workspace:^",
+		"vscode-jsonrpc": "9.0.1"
 	},
 	"devDependencies": {
 		"@rspack/cli": "2.1.4",

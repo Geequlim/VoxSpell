@@ -2013,6 +2013,7 @@ __metadata:
     ts-checker-rspack-plugin: "npm:1.5.2"
     typescript: "npm:7.0.2"
     vitest: "npm:4.1.10"
+    vscode-jsonrpc: "npm:9.0.1"
   languageName: unknown
   linkType: soft
 
