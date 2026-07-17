@@ -151,14 +151,16 @@ Rust worker 使用 `pipewire-rs`，继续保持独立进程，并沿用 stdout P
 - Socket：`$XDG_RUNTIME_DIR/voxspell/daemon.sock`。
 - 权限：运行目录 `0700`，socket `0600`。
 - 连接：Fcitx module 与 daemon 之间保持长连接并自动重连。
-- 帧格式：`uint32_be payload_length + uint8 message_type + payload`。
-- 控制 payload 使用 UTF-8 JSON；音频只在录音子进程 stdout 中传输，不通过 Fcitx IPC。
-- 每条消息必须包含 `protocolVersion`、`sessionId` 和单调递增 `sequence`。
+- 协议：使用双向 JSON-RPC 2.0；客户端命令使用 request，daemon 异步事件使用 notification。
+- 分帧：使用 LSP 风格的 `Content-Length: <bytes>\r\n\r\n<utf8-json>`，不再定义私有二进制消息信封。
+- Node 端使用 `vscode-jsonrpc/node` 的 stream reader、writer 和 message connection，不自行实现半包、粘包与请求关联。
+- 单条 JSON-RPC 消息首期限制为 1 MiB，超过限制立即关闭对应连接并记录稳定的本地协议错误码。
+- 音频只在录音子进程 stdout 中传输，不通过 Fcitx IPC，因此 IPC 不需要二进制消息类型。
 
-### 4.2 主要命令
+### 4.2 请求方法
 
 ```text
-client.hello
+initialize
 session.start
 session.finish
 session.cancel
@@ -166,14 +168,18 @@ config.reload
 daemon.ping
 ```
 
-### 4.3 主要事件
+连接建立后必须先完成 `initialize`。请求携带客户端信息和支持的 `protocolVersion`，daemon 返回协商后的版本、服务端信息与 capability。初始化前收到其他业务请求时返回 JSON-RPC 错误。
+
+`session.start` 成功后由 daemon 生成并返回 `sessionId`。后续会话请求和服务端通知在 params 中携带该 ID。Unix stream 已保证同一连接上的消息顺序，因此不再维护全局 `sequence`；partial 覆盖仍使用 segment 内单调递增的 `revision`。
+
+### 4.3 服务端通知
 
 ```text
 daemon.ready
 session.recording
 asr.ready
 transcript.partial
-transcript.segment-final
+transcript.segmentFinal
 transcript.final
 polish.started
 polish.delta
@@ -182,7 +188,19 @@ session.completed
 session.error
 ```
 
-错误必须具有稳定的本地错误码、发生阶段、是否可重试和脱敏后的供应商信息。UI 不直接展示供应商原始错误文本。
+### 4.4 Schema 与类型规范
+
+- TypeScript 侧统一使用 TypeBox 定义 IPC、配置和用户词典等跨边界结构的 schema。
+- TypeBox schema 是唯一事实来源，TypeScript 类型必须通过 `Static<typeof Schema>` 推导，不重复手写同构的 `interface` 或 `type`。
+- JSON-RPC request params、result 和 notification params 在边界处使用 TypeBox 做运行时校验。
+- 对外对象 schema 默认使用 `additionalProperties: false`；需要扩展字段时必须显式声明。
+- 公共标识、错误数据和 capability 提取为可复用 schema，并可导出标准 JSON Schema 供文档、fixture 和未来 C++ 测试使用。
+- JSON-RPC 2.0 envelope 由 `vscode-jsonrpc` 负责，不用 TypeBox 重复定义。
+- schema 校验失败统一转换为 JSON-RPC `Invalid params`，默认日志不得记录完整用户文本。
+
+### 4.5 错误
+
+JSON-RPC 解析错误、无效请求、方法不存在和参数错误使用标准错误码。业务错误使用服务端错误范围 `-32000` 至 `-32099`，并在 `error.data` 中携带稳定的本地错误码、发生阶段、是否可重试和脱敏后的供应商信息。UI 不直接展示供应商原始错误文本。
 
 ## 5. 会话状态机
 
@@ -383,7 +401,7 @@ VoxSpell/
 ├── apps/
 │   └── daemon/                    # Node daemon 入口和业务编排
 ├── packages/
-│   ├── protocol/                  # IPC schema、编解码和版本
+│   ├── protocol/                  # JSON-RPC 方法、TypeBox schema、版本和 capability
 │   ├── asr-core/                  # Provider 接口、事件和 transcript assembler
 │   ├── asr-tencent/               # 腾讯云实现
 │   ├── audio-capture/              # pw-record 进程适配和统一采集接口
@@ -402,10 +420,11 @@ VoxSpell/
 │   ├── arch/
 │   └── debian/
 ├── docs/
-└── pnpm-workspace.yaml
+├── project.tiny                   # 统一开发快捷指令
+└── yarn.lock
 ```
 
-不引入 Nx 或 Turborepo。首期使用 pnpm workspace、CMake、CTest 和少量顶层脚本即可。
+不引入 Nx 或 Turborepo。首期使用 Yarn 4 workspaces、Tiny、Rspack、CMake 和 CTest 即可；`package.json` 不承担开发快捷指令编排。
 
 ## 12. 配置与密钥
 
@@ -420,7 +439,7 @@ $XDG_RUNTIME_DIR/voxspell/daemon.sock
 
 原则：
 
-- 普通设置可由 YAML 管理并用 schema 校验。
+- 普通设置可由 YAML 管理，并使用 TypeBox schema 校验和推导 TypeScript 类型。
 - 密钥优先从环境变量、systemd credentials 或 Secret Service 获取。
 - 明文密钥文件必须是 `0600`，并从 Git 排除。
 - 配置日志只能打印密钥来源和是否存在，不能打印密钥值。
@@ -456,6 +475,9 @@ $XDG_RUNTIME_DIR/voxspell/daemon.sock
 
 ### 15.1 TypeScript
 
+- JSON-RPC method、TypeBox params/result/notification schema 和协议版本兼容性测试。
+- initialize 前置约束、无效 params、标准错误映射、消息大小上限和 Unix Socket 断线测试。
+- 使用 `vscode-jsonrpc` stream reader/writer 验证 Content-Length 分帧下的端到端请求、响应和通知。
 - 用户词典编译、冲突、热加载和旧格式迁移测试。
 - 数字归一化 golden tests。
 - 文本流水线幂等与保护词测试。
@@ -468,7 +490,7 @@ $XDG_RUNTIME_DIR/voxspell/daemon.sock
 ### 15.2 C++
 
 - PTT 按下、松开、短按、取消和失焦状态机测试。
-- IPC framing、半包、粘包、断线和过期 session 测试。
+- JSON-RPC Content-Length framing、半包、粘包、无效响应、断线和过期 session 测试。
 
 ### 15.3 端到端
 
@@ -504,10 +526,11 @@ $XDG_RUNTIME_DIR/voxspell/daemon.sock
 
 ### 阶段 1：基础骨架
 
-- 初始化 pnpm workspace 与 CMake。
-- 建立 protocol、daemon、Fcitx module 和 `AudioCaptureBackend`。
+- 初始化 Yarn 4 workspace、Tiny、Rspack 与 CMake。
+- 先建立基于 JSON-RPC 2.0 和 TypeBox 的 protocol，以及 daemon 会话状态机和 `AudioCaptureBackend`。
 - 实现 `pw-record` 后端及 fake capture 测试后端。
-- 使用 fake provider 跑通 PTT 到 preedit/commit。
+- 使用 TypeScript fake client、fake capture 和 fake provider 跑通无 C++ 的完整会话闭环。
+- 协议与 daemon 闭环稳定后再创建 Fcitx module，跑通 PTT 到 preedit/commit。
 - 建立 CI、格式化、静态检查和测试命令。
 
 完成标准：无云账号时可通过 fake provider 完成端到端输入。

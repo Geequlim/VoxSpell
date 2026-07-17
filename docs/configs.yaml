@@ -1,0 +1,88 @@
+DocsModule:
+  assetsDirs:
+    - ../node_modules/@tinyaxis/tiny-docs/assets
+    - ./assets
+  copyright: © 2026 Geequlim
+  env: development
+  logo: /assets/logo.svg
+  navigator:
+    buttons:
+      - match: equals
+        title: 首页
+        url: /
+      - match: startsWith
+        prefix: /
+        title: 文档
+        url: /getting-started
+      - match: startsWith
+        prefix: /preview
+        title: 预览
+        url: /preview
+      - match: startsWith
+        prefix: /asset-memo
+        title: AssetMemo
+        url: /asset-memo
+  pages:
+    - data:
+        features:
+          - description: 集成丰富的开发工具，提供开箱即用的解决方案。
+            image: /assets/dev/docs/img/icons8-app-development.svg
+            title: 功能丰富
+          - description: 自由组合所需服务，专注于业务功能的开发。
+            image: /assets/dev/docs/img/icons8-dependencies.svg
+            title: 模块化开发
+          - description: 采用标准化的开发范式，提升团队协作效率。
+            image: /assets/dev/docs/img/icons8-correction.svg
+            title: 统一规范
+      path: ''
+      shell:
+        breadcrumbs: false
+        footerNoMargin: true
+        sidebar: false
+      template: '@docs/pages/index.hbs'
+      title: 首页
+  publish:
+    brokenLinks:
+      action: warn
+    llm:
+      enabled: true
+      includeFrontmatter: true
+    routePrefix: /
+  remaps:
+    AGENTS:
+      order: -1
+      space: Agent
+      target: AGENTS.md
+      title: AGENTS.md
+    getting-started:
+      order: -1
+      space: 开发文档
+      target: README
+      title: 快速开始
+  routePrefix: /
+  search:
+    emptyText: 没有找到相关结果
+    enabled: true
+    errorText: 搜索暂时不可用，请稍后重试
+    initialText: 输入关键词开始搜索
+    placeholder: 搜索文档
+    searchingText: 正在搜索...
+    shortcut: Ctrl K
+  showLineNumbers: false
+  spaces:
+    - dirs:
+        - linkPrefix: ''
+          path: docs
+          title: 快速开始
+      title: 开发文档
+    - agentSkillNoOrphanDirs: true
+      dirs:
+        - path: .agents/skills
+          title: skills
+      noOrphanDirs: true
+      order: 100
+      title: Agent
+      useOrphanDocsAsDirs: true
+  tagline: 像搭积木一样构建游戏
+  title: 青鱼游戏开发框架
+  workspace: ..

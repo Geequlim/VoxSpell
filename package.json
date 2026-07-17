@@ -10,6 +10,7 @@
 		"packages/*"
 	],
 	"devDependencies": {
+		"@tinyaxis/tiny-docs": "^1.1.1",
 		"@tinyaxis/toolkit": "0.3.0",
 		"oxfmt": "0.59.0",
 		"oxlint": "1.70.0",

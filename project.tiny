@@ -32,3 +32,15 @@ publish:
     - name: build
       description: 构建 daemon bundle
       command: yarn --cwd apps/daemon rspack build
+
+tools:
+  actions:
+    - name: 文档
+      description: 启动文档预览
+      command: yarn tiny-docs -c docs/configs.yaml serve -o
+      actions:
+        - name: 构建
+          description: 生成静态文档
+          command:
+          - yarn tiny-docs -c docs/configs.yaml publish dist/docs
+          - yarn http-server dist/docs -c-1 -o
