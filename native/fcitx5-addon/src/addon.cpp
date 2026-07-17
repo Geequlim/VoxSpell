@@ -1,5 +1,6 @@
 #include "config.h"
 #include "daemon-client.h"
+#include "status-animation.h"
 #include "tap-hold-state.h"
 
 #include <fcitx/addonfactory.h>
@@ -20,12 +21,16 @@
 #include <fcitx-utils/key.h>
 #include <fcitx-utils/trackableobject.h>
 
+#include <sys/timerfd.h>
+#include <unistd.h>
+
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -34,19 +39,7 @@ namespace voxspell {
 namespace {
 
 constexpr char configFile[] = "conf/voxspell.conf";
-constexpr char connectingMessage[] = "VoxSpell · 正在连接语音服务…";
-constexpr char preparingMessage[] = "VoxSpell · 正在准备…";
-constexpr char recordingMessage[] = "VoxSpell · 请开始讲话";
-constexpr char recognizingMessage[] = "VoxSpell · 正在识别…";
-constexpr char processingMessage[] = "VoxSpell · 正在处理…";
-constexpr char polishingMessage[] = "VoxSpell · 正在润色…";
-constexpr char choosingMessage[] = "VoxSpell · 请选择结果";
-constexpr char submittingMessage[] = "VoxSpell · 正在提交…";
-constexpr char errorMessage[] = "VoxSpell · 本次语音输入失败";
-constexpr char activeHint[] = "松开热键完成，Esc 取消";
-constexpr char finishingHint[] = "请稍候";
-constexpr char choosingHint[] = "1 润色结果 · 2 识别结果 · Enter 确认";
-constexpr char errorHint[] = "未提交任何文本";
+constexpr char errorMessage[] = "⚠️ 本次语音输入失败";
 constexpr std::uint64_t errorMessageDurationUs = 1600000;
 
 class ResultCandidateWord final : public fcitx::CandidateWord {
@@ -155,6 +148,8 @@ public:
 
 	void reloadConfig() override {
 		fcitx::readAsIni(config_, configFile);
+		statusAnimations_ =
+			loadStatusAnimationConfig(statusAnimationConfigPath());
 		resetAllInputContexts();
 	}
 
@@ -467,10 +462,9 @@ private:
 		selectionRequested_ = false;
 		sawPolishing_ = false;
 		committed_ = false;
-		setVoicePanel(
+		setAnimatedVoicePanel(
 			inputContext,
-			connectingMessage,
-			activeHint,
+			"connecting",
 			{},
 			nullptr);
 
@@ -503,7 +497,7 @@ private:
 	void showTimedError(
 		fcitx::InputContext *inputContext,
 		InputContextState &state) {
-		setVoicePanel(inputContext, errorMessage, errorHint, {}, nullptr);
+		setVoicePanel(inputContext, errorMessage, {}, nullptr);
 
 		auto inputContextReference = inputContext->watch();
 		state.feedbackTimer = instance_->eventLoop().addTimeEvent(
@@ -527,17 +521,106 @@ private:
 	void setVoicePanel(
 		fcitx::InputContext *inputContext,
 		const std::string &status,
-		const std::string &hint,
 		const std::string &preedit,
 		std::unique_ptr<fcitx::CandidateList> candidates) {
 		auto *state = inputContext->propertyFor(&stateFactory_);
 		state->ownsPanel = true;
 		auto &inputPanel = inputContext->inputPanel();
 		inputPanel.setAuxUp(fcitx::Text(status));
-		inputPanel.setAuxDown(fcitx::Text(hint));
+		inputPanel.setAuxDown(fcitx::Text());
 		inputPanel.setPreedit(fcitx::Text(preedit));
 		inputPanel.setCandidateList(std::move(candidates));
 		inputContext->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+	}
+
+	std::string animatedStatus(const StatusAnimationStage &stage) const {
+		const auto &frame =
+			stage.frames[animationFrameIndex_ % stage.frames.size()];
+		return frame + " " + stage.text;
+	}
+
+	void setStatusAnimation(std::string_view stageId) {
+		if (activeAnimationId_ == stageId && animationTimerEvent_) {
+			return;
+		}
+		stopStatusAnimation();
+		activeAnimationId_ = stageId;
+		animationFrameIndex_ = 0;
+
+		const auto &stage = statusAnimations_.at(activeAnimationId_);
+		animationTimerFd_ =
+			timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+		if (animationTimerFd_ < 0) {
+			return;
+		}
+		itimerspec specification{};
+		specification.it_value.tv_sec = stage.interval / 1000;
+		specification.it_value.tv_nsec =
+			(stage.interval % 1000) * 1000000;
+		specification.it_interval = specification.it_value;
+		if (timerfd_settime(
+				animationTimerFd_,
+				0,
+				&specification,
+				nullptr) < 0) {
+			close(animationTimerFd_);
+			animationTimerFd_ = -1;
+			return;
+		}
+
+		animationTimerEvent_ = instance_->eventLoop().addIOEvent(
+			animationTimerFd_,
+			fcitx::IOEventFlag::In,
+			[this](
+				fcitx::EventSourceIO *,
+				int fileDescriptor,
+				fcitx::IOEventFlags) {
+				auto *inputContext = voiceInputContext_.get();
+				if (!inputContext || activeAnimationId_.empty()) {
+					return false;
+				}
+				std::uint64_t expirations = 0;
+				if (read(
+						fileDescriptor,
+						&expirations,
+						sizeof(expirations)) != sizeof(expirations)) {
+					return true;
+				}
+
+				const auto &currentStage =
+					statusAnimations_.at(activeAnimationId_);
+				animationFrameIndex_ = (animationFrameIndex_ + expirations) %
+					currentStage.frames.size();
+				inputContext->inputPanel().setAuxUp(
+					fcitx::Text(animatedStatus(currentStage)));
+				inputContext->updateUserInterface(
+					fcitx::UserInterfaceComponent::InputPanel);
+				return true;
+			});
+	}
+
+	void setAnimatedVoicePanel(
+		fcitx::InputContext *inputContext,
+		std::string_view stageId,
+		const std::string &preedit,
+		std::unique_ptr<fcitx::CandidateList> candidates) {
+		setStatusAnimation(stageId);
+		const auto &stage = statusAnimations_.at(activeAnimationId_);
+		setVoicePanel(
+			inputContext,
+			animatedStatus(stage),
+			preedit,
+			std::move(candidates));
+	}
+
+	void stopStatusAnimation() {
+		animationTimerEvent_.reset();
+		if (animationTimerFd_ >= 0) {
+			close(animationTimerFd_);
+			animationTimerFd_ = -1;
+		}
+		activeAnimationId_.clear();
+		animationFrameIndex_ = 0;
 	}
 
 	void renderCurrentVoiceState() {
@@ -550,21 +633,20 @@ private:
 			return;
 		}
 
-		const char *status = connectingMessage;
+		std::string_view stageId = "connecting";
 		if (sessionPhase_ == "preparing") {
-			status = preparingMessage;
+			stageId = "preparing";
 		} else if (sessionPhase_ == "recording") {
-			status = recordingMessage;
+			stageId = "recording";
 		} else if (sessionPhase_ == "recognizing") {
-			status = recognizingMessage;
+			stageId = "recognizing";
 		} else if (sessionPhase_ == "processing") {
-			status = processingMessage;
+			stageId = "processing";
 		} else if (sessionPhase_ == "polishing") {
-			status = polishingMessage;
+			stageId = "polishing";
 		} else if (sessionPhase_ == "choosing") {
-			status = choosingMessage;
+			stageId = "choosing";
 		}
-		const auto *hint = sessionPhase_ == "recording" ? activeHint : finishingHint;
 		std::unique_ptr<fcitx::CandidateList> candidates;
 		if (!previewText_.empty()) {
 			auto preview = std::make_unique<fcitx::DisplayOnlyCandidateList>();
@@ -573,7 +655,11 @@ private:
 			preview->setLayoutHint(fcitx::CandidateLayoutHint::Vertical);
 			candidates = std::move(preview);
 		}
-		setVoicePanel(inputContext, status, hint, {}, std::move(candidates));
+		setAnimatedVoicePanel(
+			inputContext,
+			stageId,
+			{},
+			std::move(candidates));
 	}
 
 	void renderResults(fcitx::InputContext *inputContext) {
@@ -589,13 +675,12 @@ private:
 					std::vector<std::string>{visibleResult->text});
 				candidates->setCursorIndex(0);
 				candidates->setLayoutHint(fcitx::CandidateLayoutHint::Vertical);
-				const auto *status = selectionRequested_
-					? submittingMessage
-					: polishingMessage;
-				setVoicePanel(
+				const auto stageId = selectionRequested_
+					? std::string_view("submitting")
+					: std::string_view("polishing");
+				setAnimatedVoicePanel(
 					inputContext,
-					status,
-					finishingHint,
+					stageId,
 					{},
 					std::move(candidates));
 				return;
@@ -605,18 +690,16 @@ private:
 				candidates->setContent(
 					std::vector<std::string>{transcriptResult_->text});
 				candidates->setCursorIndex(0);
-				setVoicePanel(
+				setAnimatedVoicePanel(
 					inputContext,
-					processingMessage,
-					finishingHint,
+					"processing",
 					{},
 					std::move(candidates));
 				return;
 			}
-			setVoicePanel(
+			setAnimatedVoicePanel(
 				inputContext,
-				polishingMessage,
-				finishingHint,
+				"polishing",
 				{},
 				nullptr);
 			return;
@@ -626,10 +709,9 @@ private:
 			candidates->setContent(
 				std::vector<std::string>{transcriptResult_->text});
 			candidates->setCursorIndex(0);
-			setVoicePanel(
+			setAnimatedVoicePanel(
 				inputContext,
-				processingMessage,
-				finishingHint,
+				"processing",
 				{},
 				std::move(candidates));
 			return;
@@ -637,13 +719,13 @@ private:
 
 		auto candidates = std::make_unique<fcitx::CommonCandidateList>();
 		candidates->setPageSize(2);
-		candidates->setLabels({"1", "2"});
+		candidates->setLabels({"", ""});
 		candidates->setLayoutHint(fcitx::CandidateLayoutHint::Vertical);
 		const bool polishedSelectable =
 			polishedResult_ && polishedResult_->status == "final";
-		std::string polishedText = "润色结果：正在润色…";
+		std::string polishedText = "1. 正在润色…";
 		if (polishedResult_ && !polishedResult_->text.empty()) {
-			polishedText = "润色结果：" + polishedResult_->text;
+			polishedText = "1. " + polishedResult_->text;
 		}
 		candidates->append<ResultCandidateWord>(
 			polishedText,
@@ -651,15 +733,15 @@ private:
 			polishedSelectable,
 			[this](const std::string &choiceId) { selectResult(choiceId); });
 		candidates->append<ResultCandidateWord>(
-			"识别结果：" + transcriptResult_->text,
+			"2. " + transcriptResult_->text,
 			"transcript",
 			true,
 			[this](const std::string &choiceId) { selectResult(choiceId); });
 		candidates->setCursorIndex(selectedChoiceId_ == "transcript" ? 1 : 0);
-		setVoicePanel(
+		setAnimatedVoicePanel(
 			inputContext,
-			selectionRequested_ ? submittingMessage : choosingMessage,
-			selectionRequested_ ? finishingHint : choosingHint,
+			selectionRequested_ ? std::string_view("submitting")
+								: std::string_view("choosing"),
 			{},
 			std::move(candidates));
 	}
@@ -673,10 +755,9 @@ private:
 		if (!inputContext || !voiceSessionId_.empty()) {
 			return;
 		}
-		setVoicePanel(
+		setAnimatedVoicePanel(
 			inputContext,
-			connectingMessage,
-			finishingHint,
+			"connecting",
 			{},
 			nullptr);
 	}
@@ -830,6 +911,7 @@ private:
 	}
 
 	void clearVoiceSessionState() {
+		stopStatusAnimation();
 		voiceSessionId_.clear();
 		startPending_ = false;
 		sessionPhase_.clear();
@@ -893,6 +975,11 @@ private:
 	bool selectionRequested_ = false;
 	bool sawPolishing_ = false;
 	bool committed_ = false;
+	StatusAnimationConfig statusAnimations_ = defaultStatusAnimationConfig();
+	std::string activeAnimationId_;
+	std::size_t animationFrameIndex_ = 0;
+	int animationTimerFd_ = -1;
+	std::unique_ptr<fcitx::EventSourceIO> animationTimerEvent_;
 	VoxSpellConfig config_;
 	fcitx::SimpleInputContextPropertyFactory<InputContextState> stateFactory_;
 	std::vector<std::unique_ptr<fcitx::HandlerTableEntry<fcitx::EventHandler>>>

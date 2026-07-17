@@ -1,0 +1,687 @@
+<!doctype html>
+<html lang="zh-CN">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>语音输入状态动画预览</title>
+		<style>
+			:root {
+				color-scheme: dark;
+				font-family:
+					Inter, "Noto Sans CJK SC", "Noto Sans SC", system-ui, sans-serif;
+				background: #101113;
+				color: #f5f5f5;
+			}
+
+			* {
+				box-sizing: border-box;
+			}
+
+			body {
+				min-height: 100vh;
+				margin: 0;
+				background:
+					radial-gradient(circle at 18% 20%, #262032 0, transparent 32%),
+					radial-gradient(circle at 82% 74%, #172a2c 0, transparent 32%),
+					#101113;
+			}
+
+			main {
+				display: grid;
+				grid-template-columns: minmax(300px, 390px) minmax(420px, 1fr);
+				min-height: 100vh;
+			}
+
+			.controls {
+				padding: 32px;
+				border-right: 1px solid #ffffff12;
+				background: #111216cc;
+				backdrop-filter: blur(18px);
+			}
+
+			h1 {
+				margin: 0 0 8px;
+				font-size: 22px;
+				font-weight: 650;
+				letter-spacing: -0.02em;
+			}
+
+			.description {
+				margin: 0 0 24px;
+				color: #a6a7ad;
+				font-size: 13px;
+				line-height: 1.65;
+			}
+
+			.stage-list {
+				display: grid;
+				grid-template-columns: repeat(2, minmax(0, 1fr));
+				gap: 8px;
+				margin-bottom: 24px;
+			}
+
+			.stage-button {
+				padding: 10px 12px;
+				border: 1px solid #ffffff12;
+				border-radius: 10px;
+				background: #ffffff08;
+				color: #c8c9ce;
+				font: inherit;
+				font-size: 13px;
+				text-align: left;
+				cursor: pointer;
+				transition: 140ms ease;
+			}
+
+			.stage-button:hover {
+				background: #ffffff10;
+				color: #fff;
+			}
+
+			.stage-button.active {
+				border-color: #ad8cff80;
+				background: #ad8cff1c;
+				color: #fff;
+			}
+
+			.editor {
+				display: grid;
+				gap: 15px;
+			}
+
+			label {
+				display: grid;
+				gap: 7px;
+				color: #b9bac0;
+				font-size: 12px;
+			}
+
+			input,
+			textarea {
+				width: 100%;
+				padding: 10px 12px;
+				border: 1px solid #ffffff17;
+				border-radius: 9px;
+				outline: none;
+				background: #090a0d;
+				color: #fff;
+				font: inherit;
+				font-size: 14px;
+			}
+
+			textarea {
+				min-height: 68px;
+				resize: vertical;
+				line-height: 1.7;
+			}
+
+			input:focus,
+			textarea:focus {
+				border-color: #ad8cffaa;
+				box-shadow: 0 0 0 3px #ad8cff16;
+			}
+
+			.label-title {
+				display: flex;
+				justify-content: space-between;
+				gap: 12px;
+			}
+
+			.frame-count {
+				color: #85868e;
+				font-variant-numeric: tabular-nums;
+			}
+
+			.frame-strip {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 5px;
+				max-height: 106px;
+				padding: 8px;
+				border: 1px solid #ffffff0e;
+				border-radius: 9px;
+				background: #090a0d80;
+				overflow-y: auto;
+			}
+
+			.frame-chip {
+				display: grid;
+				place-items: center;
+				width: 31px;
+				height: 31px;
+				border: 1px solid transparent;
+				border-radius: 7px;
+				background: #ffffff09;
+				font-family: "Noto Color Emoji", "Apple Color Emoji", sans-serif;
+				font-size: 17px;
+				transition: 120ms ease;
+			}
+
+			.frame-chip.active {
+				border-color: #ad8cff88;
+				background: #ad8cff22;
+			}
+
+			.editor-row {
+				display: grid;
+				grid-template-columns: 1fr 1fr;
+				gap: 10px;
+			}
+
+			.actions {
+				display: flex;
+				gap: 8px;
+				margin-top: 22px;
+			}
+
+			.actions button {
+				padding: 9px 13px;
+				border: 1px solid #ffffff16;
+				border-radius: 9px;
+				background: #ffffff0b;
+				color: #dedee3;
+				font: inherit;
+				font-size: 12px;
+				cursor: pointer;
+			}
+
+			.actions button.copy {
+				border-color: #ad8cff44;
+				background: #ad8cff16;
+				color: #eee9ff;
+			}
+
+			.preview-area {
+				display: grid;
+				place-items: center;
+				padding: 48px;
+			}
+
+			.desktop {
+				position: relative;
+				width: min(720px, 100%);
+				height: 470px;
+				border: 1px solid #ffffff12;
+				border-radius: 20px;
+				background: #1b1c20;
+				box-shadow: 0 28px 80px #0007;
+				overflow: hidden;
+			}
+
+			.window-bar {
+				display: flex;
+				align-items: center;
+				gap: 7px;
+				height: 42px;
+				padding: 0 15px;
+				border-bottom: 1px solid #ffffff0d;
+				background: #24252a;
+			}
+
+			.window-dot {
+				width: 10px;
+				height: 10px;
+				border-radius: 50%;
+				background: #55575f;
+			}
+
+			.document {
+				width: 72%;
+				margin: 54px auto;
+			}
+
+			.document-line {
+				height: 11px;
+				margin-bottom: 15px;
+				border-radius: 5px;
+				background: #ffffff0b;
+			}
+
+			.document-line:nth-child(2) {
+				width: 84%;
+			}
+
+			.document-line:nth-child(3) {
+				width: 63%;
+			}
+
+			.caret {
+				display: inline-block;
+				width: 2px;
+				height: 22px;
+				margin-top: 26px;
+				background: #a98bff;
+				animation: blink 1s steps(1) infinite;
+			}
+
+			.input-panel {
+				position: absolute;
+				left: 50%;
+				top: 210px;
+				width: min(470px, calc(100% - 48px));
+				transform: translateX(-50%);
+				border: 1px solid #ffffff20;
+				border-radius: 13px;
+				background: #292a30f5;
+				box-shadow: 0 18px 48px #0009;
+				overflow: hidden;
+				backdrop-filter: blur(18px);
+			}
+
+			.status {
+				display: flex;
+				align-items: center;
+				gap: 9px;
+				min-height: 46px;
+				padding: 11px 15px;
+				font-size: 15px;
+				font-weight: 560;
+			}
+
+			.status-emoji {
+				display: inline-grid;
+				place-items: center;
+				width: 24px;
+				font-family: "Noto Color Emoji", "Apple Color Emoji", sans-serif;
+				font-size: 18px;
+			}
+
+			.candidates {
+				display: grid;
+				gap: 1px;
+				border-top: 1px solid #ffffff10;
+				background: #ffffff0d;
+			}
+
+			.candidate {
+				display: flex;
+				gap: 11px;
+				padding: 11px 15px;
+				background: #24252a;
+				font-size: 14px;
+				line-height: 1.45;
+			}
+
+			.candidate.selected {
+				background: #a98bff22;
+			}
+
+			.candidate-number {
+				color: #a98bff;
+				font-variant-numeric: tabular-nums;
+			}
+
+			.hint {
+				padding: 8px 15px 10px;
+				border-top: 1px solid #ffffff0d;
+				color: #94959d;
+				font-size: 11px;
+			}
+
+			@keyframes blink {
+				50% {
+					opacity: 0;
+				}
+			}
+
+			@media (max-width: 850px) {
+				main {
+					grid-template-columns: 1fr;
+				}
+
+				.controls {
+					border-right: 0;
+					border-bottom: 1px solid #ffffff12;
+				}
+
+				.preview-area {
+					padding: 28px 18px;
+				}
+			}
+		</style>
+	</head>
+	<body>
+		<main>
+			<section class="controls">
+				<h1>状态动画预览</h1>
+				<p class="description">
+					选择一个阶段并直接修改下面的字符串，右侧会立即更新。emoji
+					可以连续输入，也可以用空格或换行分隔。
+				</p>
+
+				<div class="stage-list" id="stage-list"></div>
+
+				<div class="editor">
+					<label>
+						<span class="label-title">
+							<span>emoji 序列帧</span>
+							<span class="frame-count" id="frame-count"></span>
+						</span>
+						<textarea id="frames" autocomplete="off" spellcheck="false"></textarea>
+					</label>
+					<div class="frame-strip" id="frame-strip"></div>
+					<label>
+						状态文案
+						<input id="text" autocomplete="off" />
+					</label>
+					<div class="editor-row">
+						<label>
+							底部提示
+							<input id="hint" autocomplete="off" />
+						</label>
+						<label>
+							每帧毫秒数
+							<input id="interval" type="number" min="80" step="20" />
+						</label>
+					</div>
+				</div>
+
+				<div class="actions">
+					<button class="copy" id="copy-current" type="button">复制当前效果</button>
+					<button class="copy" id="copy-all" type="button">复制全部效果</button>
+					<button id="reset" type="button">恢复当前阶段</button>
+					<button id="reset-all" type="button">全部恢复默认</button>
+				</div>
+			</section>
+
+			<section class="preview-area">
+				<div class="desktop">
+					<div class="window-bar">
+						<span class="window-dot"></span>
+						<span class="window-dot"></span>
+						<span class="window-dot"></span>
+					</div>
+					<div class="document">
+						<div class="document-line"></div>
+						<div class="document-line"></div>
+						<div class="document-line"></div>
+						<span class="caret"></span>
+					</div>
+
+					<div class="input-panel">
+						<div class="status">
+							<span class="status-emoji" id="status-emoji"></span>
+							<span id="status-text"></span>
+						</div>
+						<div class="candidates" id="candidates"></div>
+						<div class="hint" id="status-hint"></div>
+					</div>
+				</div>
+			</section>
+		</main>
+
+		<script>
+			// 直接编辑这里即可修改所有默认效果。frames 中的每个字符串是一帧。
+			const STAGES = [
+				{
+					"id": "connecting",
+					"name": "连接服务",
+					"frames": [
+						"📡",
+						"🌐",
+						"🔗",
+						"🌐"
+					],
+					"text": "连接语音服务",
+					"hint": "请稍候",
+					"interval": 520
+				},
+				{
+					"id": "preparing",
+					"name": "准备中",
+					"frames": [
+						"⏳",
+						"⌛",
+						"⏳",
+						"⌛"
+					],
+					"text": "准备中",
+					"hint": "请稍候",
+					"interval": 420
+				},
+				{
+					"id": "recording",
+					"name": "录音",
+					"frames": [
+						"🔈",
+						"🔉",
+						"🔊",
+						"🔉"
+					],
+					"text": "请开始讲话",
+					"hint": "松开热键完成，Esc 取消",
+					"interval": 240
+				},
+				{
+					"id": "recognizing",
+					"name": "识别中",
+					"frames": [
+						"💭",
+						"💬",
+						"💭",
+						"💬"
+					],
+					"text": "正在识别",
+					"hint": "请稍候",
+					"interval": 520
+				},
+				{
+					"id": "processing",
+					"name": "处理中",
+					"frames": [
+						"🧠",
+						"💭"
+					],
+					"text": "正在处理",
+					"hint": "请稍候",
+					"interval": 420
+				},
+				{
+					"id": "polishing",
+					"name": "润色中",
+					"frames": [
+						"✨",
+						"🌟",
+						"💫",
+						"🌟",
+						"✨"
+					],
+					"text": "正在润色",
+					"hint": "请稍候",
+					"interval": 420
+				},
+				{
+					"id": "choosing",
+					"name": "选择结果",
+					"frames": [
+						"👇"
+					],
+					"text": "请选择结果",
+					"hint": "1 润色结果 · 2 识别结果 · Enter 确认",
+					"interval": 500
+				},
+				{
+					"id": "submitting",
+					"name": "提交中",
+					"frames": [
+						"📤",
+						"⏳",
+						"⌛",
+						"⏳",
+						"📤"
+					],
+					"text": "正在提交",
+					"hint": "请稍候",
+					"interval": 320
+				}
+			];
+
+			const stages = structuredClone(STAGES);
+			const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+			const stageList = document.querySelector('#stage-list');
+			const framesInput = document.querySelector('#frames');
+			const frameCount = document.querySelector('#frame-count');
+			const frameStrip = document.querySelector('#frame-strip');
+			const textInput = document.querySelector('#text');
+			const hintInput = document.querySelector('#hint');
+			const intervalInput = document.querySelector('#interval');
+			const statusEmoji = document.querySelector('#status-emoji');
+			const statusText = document.querySelector('#status-text');
+			const statusHint = document.querySelector('#status-hint');
+			const candidates = document.querySelector('#candidates');
+			let currentIndex = 0;
+			let frameIndex = 0;
+			let timer;
+
+			function parseFrames(value) {
+				return [...segmenter.segment(value)]
+					.map((segment) => segment.segment)
+					.filter((frame) => !/\s/u.test(frame));
+			}
+
+			function renderFrameStrip(stage, activeIndex) {
+				frameCount.textContent = `${stage.frames.length} 帧`;
+				frameStrip.replaceChildren(
+					...stage.frames.map((frame, index) => {
+						const chip = document.createElement('span');
+						chip.className = `frame-chip${index === activeIndex ? ' active' : ''}`;
+						chip.textContent = frame;
+						chip.title = `第 ${index + 1} 帧`;
+						return chip;
+					}),
+				);
+			}
+
+			function renderCandidates(stage) {
+				const candidateContent = {
+					recording: ['今天下午三点我们开会讨论方案'],
+					recognizing: ['今天下午三点我们开会讨论方案'],
+					processing: ['今天下午三点我们开会讨论方案。'],
+					polishing: ['今天下午三点，我们将召开会议讨论方案。'],
+					choosing: [
+						'润色结果：今天下午三点，我们将召开会议讨论方案。',
+						'识别结果：今天下午三点我们开会讨论方案。',
+					],
+				};
+				const content = candidateContent[stage.id] ?? [];
+				candidates.replaceChildren(
+					...content.map((value, index) => {
+						const row = document.createElement('div');
+						row.className = `candidate${index === 0 ? ' selected' : ''}`;
+						const number = document.createElement('span');
+						number.className = 'candidate-number';
+						number.textContent = content.length > 1 ? `${index + 1}` : '·';
+						const text = document.createElement('span');
+						text.textContent = value;
+						row.append(number, text);
+						return row;
+					}),
+				);
+			}
+
+			function renderFrame() {
+				const stage = stages[currentIndex];
+				const activeIndex = stage.frames.length === 0 ? -1 : frameIndex % stage.frames.length;
+				statusEmoji.textContent = stage.frames[activeIndex] ?? '';
+				statusText.textContent = stage.text;
+				statusHint.textContent = stage.hint;
+				renderFrameStrip(stage, activeIndex);
+				frameIndex += 1;
+			}
+
+			function restartAnimation() {
+				clearInterval(timer);
+				frameIndex = 0;
+				renderFrame();
+				timer = setInterval(renderFrame, stages[currentIndex].interval);
+			}
+
+			function selectStage(index) {
+				currentIndex = index;
+				const stage = stages[currentIndex];
+				for (const [buttonIndex, button] of [...stageList.children].entries()) {
+					button.classList.toggle('active', buttonIndex === currentIndex);
+				}
+				framesInput.value = stage.frames.join('');
+				textInput.value = stage.text;
+				hintInput.value = stage.hint;
+				intervalInput.value = stage.interval;
+				renderCandidates(stage);
+				restartAnimation();
+			}
+
+			for (const [index, stage] of stages.entries()) {
+				const button = document.createElement('button');
+				button.className = 'stage-button';
+				button.type = 'button';
+				button.textContent = stage.name;
+				button.addEventListener('click', () => selectStage(index));
+				stageList.append(button);
+			}
+
+			framesInput.addEventListener('input', () => {
+				stages[currentIndex].frames = parseFrames(framesInput.value);
+				restartAnimation();
+			});
+			textInput.addEventListener('input', () => {
+				stages[currentIndex].text = textInput.value;
+				renderFrame();
+			});
+			hintInput.addEventListener('input', () => {
+				stages[currentIndex].hint = hintInput.value;
+				renderFrame();
+			});
+			intervalInput.addEventListener('input', () => {
+				const interval = Number(intervalInput.value);
+				if (interval < 80) return;
+				stages[currentIndex].interval = interval;
+				restartAnimation();
+			});
+			document.querySelector('#reset').addEventListener('click', () => {
+				stages[currentIndex] = structuredClone(STAGES[currentIndex]);
+				selectStage(currentIndex);
+			});
+			document.querySelector('#reset-all').addEventListener('click', () => {
+				for (const [index, stage] of STAGES.entries()) {
+					stages[index] = structuredClone(stage);
+				}
+				selectStage(currentIndex);
+			});
+
+			async function copyConfiguration(value, button) {
+				const content = JSON.stringify(value, null, '\t');
+				let copied = false;
+				if (navigator.clipboard?.writeText) {
+					try {
+						await navigator.clipboard.writeText(content);
+						copied = true;
+					} catch {}
+				}
+				if (!copied) {
+					const copyArea = document.createElement('textarea');
+					copyArea.value = content;
+					copyArea.style.position = 'fixed';
+					copyArea.style.opacity = '0';
+					document.body.append(copyArea);
+					copyArea.select();
+					copied = document.execCommand('copy');
+					copyArea.remove();
+				}
+				const originalText = button.textContent;
+				button.textContent = copied ? '已复制' : '复制失败';
+				setTimeout(() => {
+					button.textContent = originalText;
+				}, 1200);
+			}
+
+			document.querySelector('#copy-current').addEventListener('click', (event) => {
+				copyConfiguration(stages[currentIndex], event.currentTarget);
+			});
+			document.querySelector('#copy-all').addEventListener('click', (event) => {
+				copyConfiguration(stages, event.currentTarget);
+			});
+
+			selectStage(0);
+		</script>
+	</body>
+</html>
