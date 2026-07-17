@@ -1,0 +1,17 @@
+{
+	"name": "@voxspell/ai-polisher",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"sideEffects": false,
+	"exports": {
+		"./text-polisher": "./src/text-polisher.ts"
+	},
+	"devDependencies": {
+		"@types/node": "24.13.3",
+		"typescript": "7.0.2"
+	},
+	"engines": {
+		"node": ">=24"
+	}
+}

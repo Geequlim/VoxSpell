@@ -3,8 +3,10 @@ export type SessionState =
 	| 'starting'
 	| 'recording'
 	| 'finishing'
-	| 'post-processing'
+	| 'recognizing'
+	| 'processing'
 	| 'polishing'
+	| 'choosing'
 	| 'completed'
 	| 'cancelling'
 	| 'cancelled'
@@ -14,9 +16,11 @@ const ALLOWED_TRANSITIONS: Readonly<Record<SessionState, readonly SessionState[]
 	idle: ['starting'],
 	starting: ['recording', 'cancelling', 'failed'],
 	recording: ['finishing', 'cancelling', 'failed'],
-	finishing: ['post-processing', 'cancelling', 'failed'],
-	'post-processing': ['polishing', 'completed', 'cancelling', 'failed'],
-	polishing: ['completed', 'cancelling', 'failed'],
+	finishing: ['recognizing', 'cancelling', 'failed'],
+	recognizing: ['processing', 'cancelling', 'failed'],
+	processing: ['polishing', 'completed', 'cancelling', 'failed'],
+	polishing: ['choosing', 'completed', 'cancelling', 'failed'],
+	choosing: ['completed', 'cancelling', 'failed'],
 	completed: ['idle'],
 	cancelling: ['cancelled', 'failed'],
 	cancelled: ['idle'],

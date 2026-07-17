@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto';
 
+import { TranscriptAssembler } from '@voxspell/asr-core/transcript-assembler';
+import { PassThroughTextPipeline } from '@voxspell/text-pipeline/text-pipeline';
+
 import { transitionSessionState } from './session-state.js';
 
+import type { TextPolisher } from '@voxspell/ai-polisher/text-polisher';
 import type {
 	AsrEvent,
 	RealtimeAsrProvider,
@@ -10,35 +14,31 @@ import type {
 import type { SessionId } from '@voxspell/protocol/common';
 import type { ProtocolErrorCode, ProtocolErrorData } from '@voxspell/protocol/errors';
 import type {
+	SessionChoiceId,
 	SessionCompletedParams,
 	SessionErrorParams,
-	SessionParams,
+	SessionPhase,
+	SessionPhaseParams,
+	SessionPreviewParams,
+	SessionResultsParams,
 	SessionStartResult,
 } from '@voxspell/protocol/session';
-import type {
-	AsrReadyParams,
-	TranscriptFinalParams,
-	TranscriptPartialParams,
-	TranscriptSegmentFinalParams,
-} from '@voxspell/protocol/transcript';
+import type { TextPipeline } from '@voxspell/text-pipeline/text-pipeline';
 import type { AudioCaptureBackend, AudioCaptureSession } from './audio-capture.js';
 import type { SessionState } from './session-state.js';
 
 export type DaemonSessionEvent =
-	| { readonly method: 'session.recording'; readonly params: SessionParams }
-	| { readonly method: 'asr.ready'; readonly params: AsrReadyParams }
-	| { readonly method: 'transcript.partial'; readonly params: TranscriptPartialParams }
-	| {
-			readonly method: 'transcript.segmentFinal';
-			readonly params: TranscriptSegmentFinalParams;
-	  }
-	| { readonly method: 'transcript.final'; readonly params: TranscriptFinalParams }
+	| { readonly method: 'session.phase'; readonly params: SessionPhaseParams }
+	| { readonly method: 'session.preview'; readonly params: SessionPreviewParams }
+	| { readonly method: 'session.results'; readonly params: SessionResultsParams }
 	| { readonly method: 'session.completed'; readonly params: SessionCompletedParams }
 	| { readonly method: 'session.error'; readonly params: SessionErrorParams };
 
 export interface SessionCoordinatorOptions {
 	readonly captureBackend: AudioCaptureBackend;
 	readonly asrProvider: RealtimeAsrProvider;
+	readonly textPipeline?: TextPipeline;
+	readonly textPolisher?: TextPolisher;
 	readonly publish?: (event: DaemonSessionEvent) => void;
 	readonly createSessionId?: () => SessionId;
 }
@@ -47,8 +47,13 @@ interface ActiveSession {
 	readonly id: SessionId;
 	readonly inputContextId: string;
 	readonly abortController: AbortController;
+	readonly transcriptAssembler: TranscriptAssembler;
 	capture?: AudioCaptureSession;
 	asr?: RealtimeAsrSession;
+	phase?: SessionPhase;
+	transcript?: string;
+	polished?: string;
+	polishAbortController?: AbortController;
 	audioPump?: Promise<void>;
 	eventPump?: Promise<void>;
 	finishOperation?: Promise<void>;
@@ -67,10 +72,12 @@ export class SessionCoordinatorError extends Error {
 	}
 }
 
-/** 管理 daemon 中唯一的活动录音与实时识别会话。 */
+/** 管理 daemon 中唯一的录音、识别、处理、润色与结果选择会话。 */
 export class SessionCoordinator {
 	readonly #captureBackend: AudioCaptureBackend;
 	readonly #asrProvider: RealtimeAsrProvider;
+	readonly #textPipeline: TextPipeline;
+	readonly #textPolisher?: TextPolisher;
 	readonly #publish: (event: DaemonSessionEvent) => void;
 	readonly #createSessionId: () => SessionId;
 	#state: SessionState = 'idle';
@@ -80,6 +87,8 @@ export class SessionCoordinator {
 	constructor(options: SessionCoordinatorOptions) {
 		this.#captureBackend = options.captureBackend;
 		this.#asrProvider = options.asrProvider;
+		this.#textPipeline = options.textPipeline ?? new PassThroughTextPipeline();
+		this.#textPolisher = options.textPolisher;
 		this.#publish = options.publish ?? (() => undefined);
 		this.#createSessionId = options.createSessionId ?? randomUUID;
 	}
@@ -107,6 +116,7 @@ export class SessionCoordinator {
 			id: this.#createSessionId(),
 			inputContextId,
 			abortController: new AbortController(),
+			transcriptAssembler: new TranscriptAssembler(),
 		};
 		this.#active = active;
 
@@ -142,7 +152,7 @@ export class SessionCoordinator {
 		}
 
 		this.#transition(active, 'recording');
-		this.#publish({ method: 'session.recording', params: { sessionId: active.id } });
+		this.#announcePhase(active, 'recording');
 		active.audioPump = this.#pumpAudio(active);
 
 		return { sessionId: active.id };
@@ -160,6 +170,28 @@ export class SessionCoordinator {
 		await active.finishOperation;
 	}
 
+	/** 选择一份已经可用的结果，并产生唯一一次完成通知。 */
+	async selectResult(sessionId: SessionId, choiceId: SessionChoiceId): Promise<void> {
+		const active = this.#active;
+		if (!active || active.id !== sessionId) {
+			if (this.#lastSettledSessionId === sessionId) return;
+			throw this.#createError('Session was not found', 'SESSION_NOT_FOUND', 'session');
+		}
+
+		let text = active.transcript;
+		if (choiceId === 'polished') text = active.polished;
+		if (!text || (this.#state !== 'polishing' && this.#state !== 'choosing')) {
+			throw this.#createError(
+				'The selected result is not available',
+				'INVALID_SESSION_STATE',
+				'session',
+			);
+		}
+
+		active.polishAbortController?.abort('result-selected');
+		this.#completeResult(active, choiceId, text);
+	}
+
 	/** 取消指定会话，并中断所有关联后端。 */
 	async cancel(sessionId: SessionId, reason: string): Promise<void> {
 		const active = this.#active;
@@ -173,8 +205,14 @@ export class SessionCoordinator {
 	}
 
 	async #finishActive(active: ActiveSession): Promise<void> {
-		if (this.#state === 'finishing' || this.#state === 'post-processing') return;
 		if (this.#state !== 'recording') {
+			if (
+				['finishing', 'recognizing', 'processing', 'polishing', 'choosing'].includes(
+					this.#state,
+				)
+			) {
+				return;
+			}
 			throw this.#createError(
 				`Cannot finish a session in state ${this.#state}`,
 				'INVALID_SESSION_STATE',
@@ -202,9 +240,10 @@ export class SessionCoordinator {
 		}
 		if (!this.#isCurrent(active) || !this.#hasState('finishing')) return;
 
+		this.#transition(active, 'recognizing');
+		this.#announcePhase(active, 'recognizing');
 		try {
 			await active.asr?.finish();
-			this.#transition(active, 'post-processing');
 		} catch (error) {
 			if (!this.#isCurrent(active) || this.#hasState('cancelling')) return;
 			const coordinatorError = this.#createError(
@@ -221,6 +260,7 @@ export class SessionCoordinator {
 		if (!this.#isCurrent(active)) return;
 		if (this.#state !== 'cancelling') this.#transition(active, 'cancelling');
 		active.abortController.abort(reason);
+		active.polishAbortController?.abort(reason);
 
 		await Promise.allSettled([active.capture?.cancel(reason), active.asr?.cancel(reason)]);
 		if (!this.#isCurrent(active)) return;
@@ -286,52 +326,20 @@ export class SessionCoordinator {
 	async #handleAsrEvent(active: ActiveSession, event: AsrEvent): Promise<boolean> {
 		switch (event.type) {
 			case 'ready':
-				this.#publish({
-					method: 'asr.ready',
-					params: { sessionId: active.id, providerId: this.#asrProvider.id },
-				});
 				return false;
 			case 'partial':
+			case 'segment-final': {
+				const text = active.transcriptAssembler.update(event);
+				if (text === undefined) return false;
+				this.#announcePhase(active, 'recognizing');
 				this.#publish({
-					method: 'transcript.partial',
-					params: {
-						sessionId: active.id,
-						segmentId: event.segmentId,
-						revision: event.revision,
-						text: event.text,
-					},
+					method: 'session.preview',
+					params: { sessionId: active.id, text },
 				});
 				return false;
-			case 'segment-final':
-				this.#publish({
-					method: 'transcript.segmentFinal',
-					params: {
-						sessionId: active.id,
-						segmentId: event.segmentId,
-						text: event.text,
-					},
-				});
-				return false;
+			}
 			case 'completed':
-				if (this.#state !== 'post-processing') {
-					await this.#fail(active, {
-						code: 'INVALID_SESSION_STATE',
-						stage: 'session',
-						retryable: false,
-					});
-					return true;
-				}
-				this.#publish({
-					method: 'transcript.final',
-					params: { sessionId: active.id, text: event.text },
-				});
-				this.#transition(active, 'completed');
-				this.#publish({
-					method: 'session.completed',
-					params: { sessionId: active.id, text: event.text },
-				});
-				this.#settle(active);
-				return true;
+				return this.#processTranscript(active, event.text);
 			case 'error':
 				await this.#fail(active, {
 					code: 'ASR_FAILED',
@@ -345,12 +353,145 @@ export class SessionCoordinator {
 		return false;
 	}
 
+	async #processTranscript(active: ActiveSession, text: string): Promise<boolean> {
+		if (this.#state !== 'recognizing') {
+			await this.#fail(active, {
+				code: 'INVALID_SESSION_STATE',
+				stage: 'session',
+				retryable: false,
+			});
+			return true;
+		}
+
+		this.#transition(active, 'processing');
+		this.#announcePhase(active, 'processing');
+		try {
+			active.transcript = await this.#textPipeline.processTranscript(
+				text,
+				active.abortController.signal,
+			);
+			if (!active.transcript) throw new Error('Text pipeline returned an empty transcript');
+		} catch (error) {
+			if (!this.#isCurrent(active)) return true;
+			await this.#fail(active, {
+				code: 'PROCESSING_FAILED',
+				stage: 'processing',
+				retryable: false,
+			});
+			return true;
+		}
+
+		if (!this.#textPolisher) {
+			this.#publishResults(active, 'transcript');
+			this.#completeResult(active, 'transcript', active.transcript);
+			return true;
+		}
+
+		this.#publishResults(active);
+		this.#transition(active, 'polishing');
+		this.#announcePhase(active, 'polishing');
+		await this.#runPolisher(active);
+		return true;
+	}
+
+	async #runPolisher(active: ActiveSession): Promise<void> {
+		const controller = new AbortController();
+		active.polishAbortController = controller;
+		let polished = '';
+
+		try {
+			for await (const event of this.#textPolisher?.polish(
+				active.transcript!,
+				controller.signal,
+			) ?? []) {
+				if (!this.#isCurrent(active) || this.#state !== 'polishing') return;
+				if (event.type === 'delta') {
+					polished = `${polished}${event.text}`;
+					this.#publishResults(active, 'polished', polished);
+					continue;
+				}
+				if (event.type === 'error') {
+					this.#finishPolishFallback(active);
+					return;
+				}
+				if (!polished) {
+					this.#finishPolishFallback(active);
+					return;
+				}
+				active.polished = await this.#textPipeline.processPolished(
+					polished,
+					controller.signal,
+				);
+				if (!this.#isCurrent(active) || this.#state !== 'polishing') return;
+				if (!active.polished) {
+					this.#finishPolishFallback(active);
+					return;
+				}
+				this.#publishResults(active, 'polished', active.polished, true);
+				this.#transition(active, 'choosing');
+				this.#announcePhase(active, 'choosing');
+				return;
+			}
+			if (this.#isCurrent(active)) this.#finishPolishFallback(active);
+		} catch (error) {
+			if (this.#isCurrent(active) && !controller.signal.aborted) {
+				this.#finishPolishFallback(active);
+			}
+		}
+	}
+
+	#finishPolishFallback(active: ActiveSession): void {
+		if (!this.#isCurrent(active) || this.#state !== 'polishing') return;
+		active.polished = undefined;
+		this.#publishResults(active, 'transcript');
+		this.#transition(active, 'choosing');
+		this.#announcePhase(active, 'choosing');
+	}
+
+	#publishResults(
+		active: ActiveSession,
+		recommendedChoiceId?: SessionChoiceId,
+		polishedText?: string,
+		polishedFinal = false,
+	): void {
+		if (!this.#isCurrent(active) || !active.transcript) return;
+		const params: SessionResultsParams = {
+			sessionId: active.id,
+			transcript: { text: active.transcript, status: 'final' },
+			recommendedChoiceId,
+		};
+		if (polishedText !== undefined) {
+			params.polished = {
+				text: polishedText,
+				status: polishedFinal ? 'final' : 'streaming',
+			};
+		}
+		this.#publish({ method: 'session.results', params });
+	}
+
+	#announcePhase(active: ActiveSession, phase: SessionPhase): void {
+		if (!this.#isCurrent(active) || active.phase === phase) return;
+		active.phase = phase;
+		this.#publish({ method: 'session.phase', params: { sessionId: active.id, phase } });
+	}
+
+	#completeResult(active: ActiveSession, choiceId: SessionChoiceId, text: string): void {
+		if (!this.#isCurrent(active)) return;
+		this.#transition(active, 'completed');
+		this.#publish({
+			method: 'session.completed',
+			params: { sessionId: active.id, selectedChoiceId: choiceId, text },
+		});
+		this.#settle(active);
+	}
+
 	async #fail(active: ActiveSession, data: ProtocolErrorData): Promise<void> {
 		if (!this.#isCurrent(active) || this.#state === 'failed' || this.#state === 'cancelling') {
 			return;
 		}
 		active.failure = data;
 		active.abortController.abort(data.code);
+		active.polishAbortController?.abort(data.code);
 		await Promise.allSettled([
 			active.capture?.cancel(data.code),
 			active.asr?.cancel(data.code),

@@ -1,7 +1,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import { InitializeParamsSchema } from '../src/initialize.js';
-import { TranscriptPartialParamsSchema } from '../src/transcript.js';
+import { SessionSelectResultParamsSchema } from '../src/session.js';
 import { ProtocolValidationError, validateProtocolValue } from '../src/validation.js';
 
 import type { InitializeParams } from '../src/initialize.js';
@@ -39,11 +39,9 @@ describe('validateProtocolValue', () => {
 		expect.hasAssertions();
 
 		try {
-			validateProtocolValue(TranscriptPartialParamsSchema, {
+			validateProtocolValue(SessionSelectResultParamsSchema, {
 				sessionId: SESSION_ID,
-				segmentId: 'segment-1',
-				revision: -1,
-				text: 'hello',
+				choiceId: 'unknown',
 			});
 		} catch (error) {
 			expect(error).toBeInstanceOf(ProtocolValidationError);
@@ -51,7 +49,7 @@ describe('validateProtocolValue', () => {
 			expect(error.issues).toEqual(
 				expect.arrayContaining([
 					expect.objectContaining({
-						path: '/revision',
+						path: '/choiceId',
 					}),
 				]),
 			);

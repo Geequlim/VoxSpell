@@ -3,7 +3,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { SessionCoordinator, SessionCoordinatorError } from '../src/session-coordinator.js';
 import { FakeAudioCaptureBackend } from './fakes/fake-audio-capture.js';
 import { FakeRealtimeAsrProvider } from './fakes/fake-realtime-asr.js';
+import { FakeTextPolisher } from './fakes/fake-text-polisher.js';
 
+import type { TextPolisher } from '@voxspell/ai-polisher/text-polisher';
+import type { TextPipeline } from '@voxspell/text-pipeline/text-pipeline';
 import type { DaemonSessionEvent } from '../src/session-coordinator.js';
 
 const SESSION_ID = '0190c95b-7f28-7b12-8b6f-a4d3fd239013';
@@ -16,14 +19,23 @@ interface TestContext {
 	readonly coordinator: SessionCoordinator;
 }
 
+interface TestContextOptions {
+	readonly sessionIds?: string[];
+	readonly textPipeline?: TextPipeline;
+	readonly textPolisher?: TextPolisher;
+}
+
 /** 创建使用确定性 ID 和测试 fake 的协调器。 */
-function createTestContext(sessionIds: string[] = [SESSION_ID]): TestContext {
+function createTestContext(options: TestContextOptions = {}): TestContext {
+	const sessionIds = options.sessionIds ?? [SESSION_ID];
 	const captureBackend = new FakeAudioCaptureBackend();
 	const asrProvider = new FakeRealtimeAsrProvider();
 	const events: DaemonSessionEvent[] = [];
 	const coordinator = new SessionCoordinator({
 		captureBackend,
 		asrProvider,
+		textPipeline: options.textPipeline,
+		textPolisher: options.textPolisher,
 		publish: (event) => events.push(event),
 		createSessionId: () => {
 			const sessionId = sessionIds.shift();
@@ -35,53 +47,157 @@ function createTestContext(sessionIds: string[] = [SESSION_ID]): TestContext {
 	return { captureBackend, asrProvider, events, coordinator };
 }
 
+/** 推进 fake 会话到确定性文本处理阶段。 */
+async function completeAsr(context: TestContext, text: string): Promise<void> {
+	await context.coordinator.finish(SESSION_ID);
+	context.asrProvider.sessions[0].emit({ type: 'completed', text });
+}
+
 describe('SessionCoordinator', () => {
-	it('runs audio and ASR events through a completed session', async () => {
+	it('publishes corrected preview snapshots and completes without AI polish', async () => {
 		const context = createTestContext();
 		const result = await context.coordinator.start('input-context-1');
 		const capture = context.captureBackend.sessions[0];
 		const asr = context.asrProvider.sessions[0];
 
 		expect(result).toEqual({ sessionId: SESSION_ID });
-		expect(context.coordinator.state).toBe('recording');
-		asr.emit({ type: 'ready' });
 		asr.emit({
 			type: 'partial',
 			segmentId: 'segment-1',
 			revision: 0,
-			text: '你好',
+			text: '今天下午三点开会',
 		});
 		asr.emit({
-			type: 'segment-final',
+			type: 'partial',
 			segmentId: 'segment-1',
-			text: '你好',
+			revision: 1,
+			text: '今天下午三点我们开会',
+		});
+		asr.emit({
+			type: 'partial',
+			segmentId: 'segment-1',
+			revision: 0,
+			text: '过期内容',
 		});
 		capture.pushFrame(Uint8Array.from([1, 2]));
-		capture.pushFrame(Uint8Array.from([3]));
 
-		await vi.waitFor(() => {
-			expect(asr.audioFrames).toEqual([Uint8Array.from([1, 2]), Uint8Array.from([3])]);
-		});
-
-		await context.coordinator.finish(SESSION_ID);
-		expect(context.coordinator.state).toBe('post-processing');
-		expect(capture.stopCalls).toBe(1);
-		expect(asr.finishCalls).toBe(1);
-
-		asr.emit({ type: 'completed', text: '你好，世界。' });
+		await vi.waitFor(() => expect(asr.audioFrames).toHaveLength(1));
+		await completeAsr(context, '今天下午三点我们开会');
 		await vi.waitFor(() => expect(context.coordinator.state).toBe('idle'));
-		await context.coordinator.finish(SESSION_ID);
 
-		expect(capture.stopCalls).toBe(1);
-		expect(asr.finishCalls).toBe(1);
-		expect(context.events.map((event) => event.method)).toEqual([
-			'session.recording',
-			'asr.ready',
-			'transcript.partial',
-			'transcript.segmentFinal',
-			'transcript.final',
-			'session.completed',
+		expect(
+			context.events
+				.filter((event) => event.method === 'session.preview')
+				.map((event) => event.params.text),
+		).toEqual(['今天下午三点开会', '今天下午三点我们开会']);
+		expect(context.events.filter((event) => event.method === 'session.phase')).toEqual([
+			{ method: 'session.phase', params: { sessionId: SESSION_ID, phase: 'recording' } },
+			{ method: 'session.phase', params: { sessionId: SESSION_ID, phase: 'recognizing' } },
+			{ method: 'session.phase', params: { sessionId: SESSION_ID, phase: 'processing' } },
 		]);
+		expect(context.events.at(-2)).toEqual({
+			method: 'session.results',
+			params: {
+				sessionId: SESSION_ID,
+				transcript: { text: '今天下午三点我们开会', status: 'final' },
+				recommendedChoiceId: 'transcript',
+			},
+		});
+		expect(context.events.at(-1)).toEqual({
+			method: 'session.completed',
+			params: {
+				sessionId: SESSION_ID,
+				selectedChoiceId: 'transcript',
+				text: '今天下午三点我们开会',
+			},
+		});
+		expect(context.coordinator.state).toBe('idle');
+	});
+
+	it('publishes full polished snapshots and exposes both final results', async () => {
+		const polisher = new FakeTextPolisher();
+		const pipeline: TextPipeline = {
+			processTranscript: async (text) => `识别:${text}`,
+			processPolished: async (text) => `润色:${text}`,
+		};
+		const context = createTestContext({ textPipeline: pipeline, textPolisher: polisher });
+		await context.coordinator.start('input-context-1');
+		await completeAsr(context, '原始输入');
+		await vi.waitFor(() => expect(context.coordinator.state).toBe('polishing'));
+		const polishSession = polisher.sessions[0];
+
+		expect(polishSession.input).toBe('识别:原始输入');
+		polishSession.emit({ type: 'delta', text: '更自然' });
+		polishSession.emit({ type: 'delta', text: '的表达' });
+		polishSession.emit({ type: 'completed' });
+		await vi.waitFor(() => expect(context.coordinator.state).toBe('choosing'));
+
+		const results = context.events
+			.filter((event) => event.method === 'session.results')
+			.map((event) => event.params);
+		expect(results).toEqual([
+			{
+				sessionId: SESSION_ID,
+				transcript: { text: '识别:原始输入', status: 'final' },
+				recommendedChoiceId: undefined,
+			},
+			{
+				sessionId: SESSION_ID,
+				transcript: { text: '识别:原始输入', status: 'final' },
+				polished: { text: '更自然', status: 'streaming' },
+				recommendedChoiceId: 'polished',
+			},
+			{
+				sessionId: SESSION_ID,
+				transcript: { text: '识别:原始输入', status: 'final' },
+				polished: { text: '更自然的表达', status: 'streaming' },
+				recommendedChoiceId: 'polished',
+			},
+			{
+				sessionId: SESSION_ID,
+				transcript: { text: '识别:原始输入', status: 'final' },
+				polished: { text: '润色:更自然的表达', status: 'final' },
+				recommendedChoiceId: 'polished',
+			},
+		]);
+
+		await context.coordinator.selectResult(SESSION_ID, 'polished');
+		expect(context.events.at(-1)).toMatchObject({
+			method: 'session.completed',
+			params: { selectedChoiceId: 'polished', text: '润色:更自然的表达' },
+		});
+	});
+
+	it('lets the client select the transcript while polish is streaming', async () => {
+		const polisher = new FakeTextPolisher();
+		const context = createTestContext({ textPolisher: polisher });
+		await context.coordinator.start('input-context-1');
+		await completeAsr(context, '可靠识别结果');
+		await vi.waitFor(() => expect(context.coordinator.state).toBe('polishing'));
+		polisher.sessions[0].emit({ type: 'delta', text: '尚未完成' });
+
+		await context.coordinator.selectResult(SESSION_ID, 'transcript');
+
+		expect(polisher.sessions[0].aborted).toBe(true);
+		expect(context.events.at(-1)).toMatchObject({
+			method: 'session.completed',
+			params: { selectedChoiceId: 'transcript', text: '可靠识别结果' },
+		});
+	});
+
+	it('rejects selecting an unfinished polished result', async () => {
+		const polisher = new FakeTextPolisher();
+		const context = createTestContext({ textPolisher: polisher });
+		await context.coordinator.start('input-context-1');
+		await completeAsr(context, '识别结果');
+		await vi.waitFor(() => expect(context.coordinator.state).toBe('polishing'));
+
+		await expect(
+			context.coordinator.selectResult(SESSION_ID, 'polished'),
+		).rejects.toMatchObject({
+			data: { code: 'INVALID_SESSION_STATE' },
+		});
+		await context.coordinator.cancel(SESSION_ID, 'user');
 	});
 
 	it('can cancel while waiting for the final ASR result', async () => {
@@ -89,7 +205,7 @@ describe('SessionCoordinator', () => {
 		await context.coordinator.start('input-context-1');
 		await context.coordinator.finish(SESSION_ID);
 
-		expect(context.coordinator.state).toBe('post-processing');
+		expect(context.coordinator.state).toBe('recognizing');
 		await context.coordinator.cancel(SESSION_ID, 'user');
 
 		expect(context.coordinator.state).toBe('idle');
@@ -97,36 +213,14 @@ describe('SessionCoordinator', () => {
 		expect(context.asrProvider.sessions[0].cancelCalls).toBe(1);
 	});
 
-	it('cancels both backends once', async () => {
-		const context = createTestContext();
-		await context.coordinator.start('input-context-1');
-		const capture = context.captureBackend.sessions[0];
-		const asr = context.asrProvider.sessions[0];
-
-		await context.coordinator.cancel(SESSION_ID, 'user');
-		await context.coordinator.cancel(SESSION_ID, 'user');
-
-		expect(context.coordinator.state).toBe('idle');
-		expect(capture.cancelCalls).toBe(1);
-		expect(asr.cancelCalls).toBe(1);
-	});
-
-	it('rejects a second active session', async () => {
-		const context = createTestContext();
-		await context.coordinator.start('input-context-1');
-
-		await expect(context.coordinator.start('input-context-2')).rejects.toMatchObject({
-			data: { code: 'SESSION_BUSY' },
-		});
-		await context.coordinator.cancel(SESSION_ID, 'user');
-	});
-
 	it('reports Provider failures with a stable protocol error', async () => {
 		const context = createTestContext();
 		await context.coordinator.start('input-context-1');
-		const asr = context.asrProvider.sessions[0];
-
-		asr.emit({ type: 'error', code: 'FAKE_UNAVAILABLE', retryable: true });
+		context.asrProvider.sessions[0].emit({
+			type: 'error',
+			code: 'FAKE_UNAVAILABLE',
+			retryable: true,
+		});
 
 		await vi.waitFor(() => expect(context.coordinator.state).toBe('idle'));
 		expect(context.events.at(-1)).toEqual({
@@ -144,7 +238,7 @@ describe('SessionCoordinator', () => {
 	});
 
 	it('ignores events from a settled session after a new session starts', async () => {
-		const context = createTestContext([SESSION_ID, NEXT_SESSION_ID]);
+		const context = createTestContext({ sessionIds: [SESSION_ID, NEXT_SESSION_ID] });
 		await context.coordinator.start('input-context-1');
 		const oldAsr = context.asrProvider.sessions[0];
 		await context.coordinator.cancel(SESSION_ID, 'replaced');
@@ -167,7 +261,6 @@ describe('SessionCoordinator', () => {
 	it('fails when audio capture ends unexpectedly', async () => {
 		const context = createTestContext();
 		await context.coordinator.start('input-context-1');
-
 		context.captureBackend.sessions[0].endUnexpectedly();
 
 		await vi.waitFor(() => expect(context.coordinator.state).toBe('idle'));

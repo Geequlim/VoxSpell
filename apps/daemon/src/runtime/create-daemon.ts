@@ -17,7 +17,9 @@ import {
 import { UnixSocketServer } from '../transport/unix-socket-server.js';
 
 import type { Socket } from 'node:net';
+import type { TextPolisher } from '@voxspell/ai-polisher/text-polisher';
 import type { RealtimeAsrProvider } from '@voxspell/asr-core/realtime-asr';
+import type { TextPipeline } from '@voxspell/text-pipeline/text-pipeline';
 import type { AudioCaptureBackend } from '../audio-capture.js';
 import type { UnixSocketClient } from '../transport/unix-socket-server.js';
 
@@ -26,6 +28,8 @@ export interface DaemonRuntimeOptions {
 	readonly fakeText?: string;
 	readonly captureBackend?: AudioCaptureBackend;
 	readonly asrProvider?: RealtimeAsrProvider;
+	readonly textPipeline?: TextPipeline;
+	readonly textPolisher?: TextPolisher;
 	readonly maximumContentLength?: number;
 	readonly onError?: (error: Error) => void;
 }
@@ -54,6 +58,8 @@ export class DaemonRuntime {
 	constructor(options: DaemonRuntimeOptions) {
 		const captureBackend = options.captureBackend ?? new DeterministicAudioCaptureBackend();
 		const asrProvider = options.asrProvider ?? new DeterministicAsrProvider(options.fakeText);
+		const textPipeline = options.textPipeline;
+		const textPolisher = options.textPolisher;
 		const maximumContentLength = options.maximumContentLength ?? DEFAULT_MAX_CONTENT_LENGTH;
 		const onError = options.onError ?? (() => undefined);
 
@@ -65,6 +71,8 @@ export class DaemonRuntime {
 					socket,
 					captureBackend,
 					asrProvider,
+					textPipeline,
+					textPolisher,
 					maximumContentLength,
 					onError,
 				),
@@ -89,6 +97,8 @@ export class DaemonRuntime {
 		socket: Socket,
 		captureBackend: AudioCaptureBackend,
 		asrProvider: RealtimeAsrProvider,
+		textPipeline: TextPipeline | undefined,
+		textPolisher: TextPolisher | undefined,
 		maximumContentLength: number,
 		onError: (error: Error) => void,
 	): UnixSocketClient {
@@ -103,13 +113,15 @@ export class DaemonRuntime {
 			serverInfo: { name: 'voxspell-daemon', version: '0.0.0' },
 			capabilities: {
 				partialTranscript: asrProvider.capabilities.partialResults,
-				polishPreview: false,
+				polishPreview: textPolisher !== undefined,
 			},
 			reloadConfig: async () => undefined,
 			createSessionCoordinator: (publish) =>
 				new SessionCoordinator({
 					captureBackend,
 					asrProvider,
+					textPipeline,
+					textPolisher,
 					publish,
 				}),
 		});

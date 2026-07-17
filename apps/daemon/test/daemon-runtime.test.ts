@@ -10,14 +10,11 @@ import { InitializeRequest } from '@voxspell/protocol/initialize';
 import {
 	SessionCompletedNotification,
 	SessionFinishRequest,
-	SessionRecordingNotification,
+	SessionPhaseNotification,
+	SessionPreviewNotification,
+	SessionResultsNotification,
 	SessionStartRequest,
 } from '@voxspell/protocol/session';
-import {
-	AsrReadyNotification,
-	TranscriptFinalNotification,
-	TranscriptPartialNotification,
-} from '@voxspell/protocol/transcript';
 import {
 	StreamMessageReader,
 	StreamMessageWriter,
@@ -84,24 +81,21 @@ describe('DaemonRuntime', () => {
 			new StreamMessageWriter(socket),
 		);
 		const methods: string[] = [];
-		let partialText: string | undefined;
-		let finalText: string | undefined;
+		let previewText: string | undefined;
+		let transcriptText: string | undefined;
 		client.onNotification(DaemonReadyNotification, () => {
 			methods.push('daemon.ready');
 		});
-		client.onNotification(SessionRecordingNotification, () => {
-			methods.push('session.recording');
+		client.onNotification(SessionPhaseNotification, () => {
+			methods.push('session.phase');
 		});
-		client.onNotification(AsrReadyNotification, () => {
-			methods.push('asr.ready');
+		client.onNotification(SessionPreviewNotification, (params) => {
+			methods.push('session.preview');
+			previewText = params.text;
 		});
-		client.onNotification(TranscriptPartialNotification, (params) => {
-			methods.push('transcript.partial');
-			partialText = params.text;
-		});
-		client.onNotification(TranscriptFinalNotification, (params) => {
-			methods.push('transcript.final');
-			finalText = params.text;
+		client.onNotification(SessionResultsNotification, (params) => {
+			methods.push('session.results');
+			transcriptText = params.transcript.text;
 		});
 		client.onNotification(SessionCompletedNotification, () => {
 			methods.push('session.completed');
@@ -115,17 +109,18 @@ describe('DaemonRuntime', () => {
 		const { sessionId } = await client.sendRequest(SessionStartRequest, {
 			inputContextId: 'input-context-1',
 		});
-		await vi.waitFor(() => expect(partialText).toBe('固定识别结果'));
+		await vi.waitFor(() => expect(previewText).toBe('固定识别结果'));
 		await client.sendRequest(SessionFinishRequest, { sessionId });
-		await vi.waitFor(() => expect(finalText).toBe('固定识别结果'));
+		await vi.waitFor(() => expect(transcriptText).toBe('固定识别结果'));
 		await vi.waitFor(() => expect(methods).toContain('session.completed'));
 
 		expect(methods).toEqual([
 			'daemon.ready',
-			'session.recording',
-			'asr.ready',
-			'transcript.partial',
-			'transcript.final',
+			'session.phase',
+			'session.phase',
+			'session.preview',
+			'session.phase',
+			'session.results',
 			'session.completed',
 		]);
 		client.dispose();

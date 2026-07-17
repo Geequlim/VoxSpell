@@ -26,21 +26,19 @@ import {
 	SessionFinishRequest,
 	SessionFinishResultSchema,
 	SessionParamsSchema,
-	SessionRecordingNotification,
+	SessionPhaseNotification,
+	SessionPhaseParamsSchema,
+	SessionPreviewNotification,
+	SessionPreviewParamsSchema,
+	SessionResultsNotification,
+	SessionResultsParamsSchema,
+	SessionSelectResultParamsSchema,
+	SessionSelectResultRequest,
+	SessionSelectResultResultSchema,
 	SessionStartParamsSchema,
 	SessionStartRequest,
 	SessionStartResultSchema,
 } from '@voxspell/protocol/session';
-import {
-	AsrReadyNotification,
-	AsrReadyParamsSchema,
-	TranscriptFinalNotification,
-	TranscriptFinalParamsSchema,
-	TranscriptPartialNotification,
-	TranscriptPartialParamsSchema,
-	TranscriptSegmentFinalNotification,
-	TranscriptSegmentFinalParamsSchema,
-} from '@voxspell/protocol/transcript';
 import { ProtocolValidationError, validateProtocolValue } from '@voxspell/protocol/validation';
 import { ErrorCodes, ResponseError } from 'vscode-jsonrpc/node';
 
@@ -201,6 +199,19 @@ export class DaemonRpcConnection {
 			return validateOutbound(() => validateProtocolValue(SessionCancelResultSchema, null));
 		});
 
+		this.#connection.onRequest(SessionSelectResultRequest, async (rawParams) => {
+			this.#ensureInitialized();
+			const params = validateInbound(() =>
+				validateProtocolValue(SessionSelectResultParamsSchema, rawParams),
+			);
+			await this.#runSessionOperation(() =>
+				this.#coordinator.selectResult(params.sessionId, params.choiceId),
+			);
+			return validateOutbound(() =>
+				validateProtocolValue(SessionSelectResultResultSchema, null),
+			);
+		});
+
 		this.#connection.onRequest(ConfigReloadRequest, async (rawParams) => {
 			this.#ensureInitialized();
 			validateInbound(() => validateProtocolValue(ConfigReloadParamsSchema, rawParams));
@@ -248,39 +259,25 @@ export class DaemonRpcConnection {
 
 	async #sendSessionEvent(event: DaemonSessionEvent): Promise<void> {
 		switch (event.method) {
-			case 'session.recording':
+			case 'session.phase':
 				return this.#connection.sendNotification(
-					SessionRecordingNotification,
+					SessionPhaseNotification,
 					validateOutbound(() =>
-						validateProtocolValue(SessionParamsSchema, event.params),
+						validateProtocolValue(SessionPhaseParamsSchema, event.params),
 					),
 				);
-			case 'asr.ready':
+			case 'session.preview':
 				return this.#connection.sendNotification(
-					AsrReadyNotification,
+					SessionPreviewNotification,
 					validateOutbound(() =>
-						validateProtocolValue(AsrReadyParamsSchema, event.params),
+						validateProtocolValue(SessionPreviewParamsSchema, event.params),
 					),
 				);
-			case 'transcript.partial':
+			case 'session.results':
 				return this.#connection.sendNotification(
-					TranscriptPartialNotification,
+					SessionResultsNotification,
 					validateOutbound(() =>
-						validateProtocolValue(TranscriptPartialParamsSchema, event.params),
-					),
-				);
-			case 'transcript.segmentFinal':
-				return this.#connection.sendNotification(
-					TranscriptSegmentFinalNotification,
-					validateOutbound(() =>
-						validateProtocolValue(TranscriptSegmentFinalParamsSchema, event.params),
-					),
-				);
-			case 'transcript.final':
-				return this.#connection.sendNotification(
-					TranscriptFinalNotification,
-					validateOutbound(() =>
-						validateProtocolValue(TranscriptFinalParamsSchema, event.params),
+						validateProtocolValue(SessionResultsParamsSchema, event.params),
 					),
 				);
 			case 'session.completed':

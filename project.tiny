@@ -23,6 +23,7 @@ develop:
       description: 执行单元测试
       command:
         - yarn --cwd packages/protocol vitest run
+        - yarn --cwd packages/asr-core vitest run
         - yarn --cwd packages/config vitest run
         - yarn --cwd packages/asr-openai-compatible vitest run
         - yarn --cwd apps/daemon vitest run
@@ -56,8 +57,10 @@ develop:
       command:
         - yarn --cwd packages/protocol tsc --noEmit
         - yarn --cwd packages/asr-core tsc --noEmit
+        - yarn --cwd packages/ai-polisher tsc --noEmit
         - yarn --cwd packages/config tsc --noEmit
         - yarn --cwd packages/asr-openai-compatible tsc --noEmit
+        - yarn --cwd packages/text-pipeline tsc --noEmit
         - yarn --cwd apps/daemon tsc --noEmit
     - name: lint
       description: 使用 Oxlint 执行静态代码分析

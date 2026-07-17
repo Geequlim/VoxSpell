@@ -11,10 +11,10 @@ import { SessionCancelRequest } from '@voxspell/protocol/session';
 import { SessionCompletedNotification } from '@voxspell/protocol/session';
 import { SessionErrorNotification } from '@voxspell/protocol/session';
 import { SessionFinishRequest } from '@voxspell/protocol/session';
-import { SessionRecordingNotification } from '@voxspell/protocol/session';
+import { SessionPhaseNotification } from '@voxspell/protocol/session';
+import { SessionPreviewNotification } from '@voxspell/protocol/session';
+import { SessionResultsNotification } from '@voxspell/protocol/session';
 import { SessionStartRequest } from '@voxspell/protocol/session';
-import { TranscriptFinalNotification } from '@voxspell/protocol/transcript';
-import { TranscriptPartialNotification } from '@voxspell/protocol/transcript';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { StreamMessageReader } from 'vscode-jsonrpc/node';
 import { StreamMessageWriter } from 'vscode-jsonrpc/node';
@@ -26,8 +26,11 @@ import { DaemonRuntime } from '../src/runtime/create-daemon.js';
 import type { Server } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
 import type { InitializeResult } from '@voxspell/protocol/initialize';
-import type { SessionCompletedParams, SessionErrorParams } from '@voxspell/protocol/session';
-import type { TranscriptFinalParams } from '@voxspell/protocol/transcript';
+import type {
+	SessionCompletedParams,
+	SessionErrorParams,
+	SessionResultsParams,
+} from '@voxspell/protocol/session';
 import type { MessageConnection } from 'vscode-jsonrpc/node';
 
 const FIXTURE_PATH = path.resolve('test/fixtures/ascend/ascend_test_00138.wav');
@@ -53,7 +56,7 @@ interface DaemonTestContext {
 	readonly methods: string[];
 	readonly completed: SessionCompletedParams[];
 	readonly errors: SessionErrorParams[];
-	readonly finalTranscripts: TranscriptFinalParams[];
+	readonly results: SessionResultsParams[];
 	readonly initialization: InitializeResult;
 }
 
@@ -138,18 +141,17 @@ async function createDaemonTestContext(api: FakeTranscriptionApi): Promise<Daemo
 	const methods: string[] = [];
 	const completed: SessionCompletedParams[] = [];
 	const errors: SessionErrorParams[] = [];
-	const finalTranscripts: TranscriptFinalParams[] = [];
-	client.onNotification(SessionRecordingNotification, (params) => {
-		void params;
-		methods.push('session.recording');
+	const results: SessionResultsParams[] = [];
+	client.onNotification(SessionPhaseNotification, (params) => {
+		methods.push(`session.phase:${params.phase}`);
 	});
-	client.onNotification(TranscriptPartialNotification, (params) => {
+	client.onNotification(SessionPreviewNotification, (params) => {
 		void params;
-		methods.push('transcript.partial');
+		methods.push('session.preview');
 	});
-	client.onNotification(TranscriptFinalNotification, (params) => {
-		methods.push('transcript.final');
-		finalTranscripts.push(params);
+	client.onNotification(SessionResultsNotification, (params) => {
+		methods.push('session.results');
+		results.push(params);
 	});
 	client.onNotification(SessionCompletedNotification, (params) => {
 		methods.push('session.completed');
@@ -172,7 +174,7 @@ async function createDaemonTestContext(api: FakeTranscriptionApi): Promise<Daemo
 		methods,
 		completed,
 		errors,
-		finalTranscripts,
+		results,
 		initialization,
 	};
 	contexts.push(context);
@@ -184,7 +186,7 @@ async function finishRecording(context: DaemonTestContext): Promise<string> {
 	const { sessionId } = await context.client.sendRequest(SessionStartRequest, {
 		inputContextId: 'input-context-1',
 	});
-	await vi.waitFor(() => expect(context.methods).toContain('session.recording'));
+	await vi.waitFor(() => expect(context.methods).toContain('session.phase:recording'));
 	await expect(
 		context.client.sendRequest(SessionFinishRequest, { sessionId }),
 	).resolves.toBeNull();
@@ -202,7 +204,7 @@ afterEach(async () => {
 });
 
 describe('OpenAI-compatible daemon contract', () => {
-	it('publishes one final result only after the batch response completes', async () => {
+	it('publishes one transcript result and completes when polish is disabled', async () => {
 		const api = await createFakeTranscriptionApi();
 		const context = await createDaemonTestContext(api);
 
@@ -210,16 +212,16 @@ describe('OpenAI-compatible daemon contract', () => {
 		await finishRecording(context);
 		await api.requestReceived;
 		expect(context.completed).toHaveLength(0);
-		expect(context.finalTranscripts).toHaveLength(0);
+		expect(context.results).toHaveLength(0);
 
 		api.respond({ status: 200, body: { text: 'daemon 识别完成' } });
-		await vi.waitFor(() => expect(context.completed).toHaveLength(1));
+		await vi.waitFor(() => expect(context.results).toHaveLength(1));
 
-		expect(context.finalTranscripts).toHaveLength(1);
-		expect(context.finalTranscripts[0].text).toBe('daemon 识别完成');
+		expect(context.results[0].transcript.text).toBe('daemon 识别完成');
+		await vi.waitFor(() => expect(context.completed).toHaveLength(1));
 		expect(context.completed[0].text).toBe('daemon 识别完成');
-		expect(context.methods.filter((method) => method === 'transcript.partial')).toHaveLength(0);
-		expect(context.methods.slice(-2)).toEqual(['transcript.final', 'session.completed']);
+		expect(context.methods.filter((method) => method === 'session.preview')).toHaveLength(0);
+		expect(context.methods.slice(-2)).toEqual(['session.results', 'session.completed']);
 	});
 
 	it('cancels an in-flight batch request without publishing a result', async () => {
@@ -235,7 +237,7 @@ describe('OpenAI-compatible daemon contract', () => {
 		api.respond({ status: 200, body: { text: '不应提交' } });
 		await delay(25);
 
-		expect(context.finalTranscripts).toHaveLength(0);
+		expect(context.results).toHaveLength(0);
 		expect(context.completed).toHaveLength(0);
 		expect(context.errors).toHaveLength(0);
 	});

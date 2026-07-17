@@ -10,9 +10,7 @@
 		"./daemon": "./src/daemon.ts",
 		"./errors": "./src/errors.ts",
 		"./initialize": "./src/initialize.ts",
-		"./polish": "./src/polish.ts",
 		"./session": "./src/session.ts",
-		"./transcript": "./src/transcript.ts",
 		"./validation": "./src/validation.ts"
 	},
 	"dependencies": {

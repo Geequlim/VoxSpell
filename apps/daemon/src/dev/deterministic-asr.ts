@@ -24,28 +24,32 @@ export class DeterministicAsrProvider implements RealtimeAsrProvider {
 	readonly id = 'deterministic';
 	readonly capabilities = { partialResults: true };
 	readonly #text: string;
+	readonly #partialTexts: readonly string[];
 
-	constructor(text = 'VoxSpell 测试成功') {
+	constructor(text = 'VoxSpell 测试成功', partialTexts: readonly string[] = [text]) {
 		this.#text = text;
+		this.#partialTexts = partialTexts;
 	}
 
 	async createSession(options: AsrSessionOptions): Promise<RealtimeAsrSession> {
-		return new DeterministicAsrSession(options, this.#text);
+		return new DeterministicAsrSession(options, this.#text, this.#partialTexts);
 	}
 }
 
 class DeterministicAsrSession implements RealtimeAsrSession {
 	readonly #options: AsrSessionOptions;
 	readonly #text: string;
+	readonly #partialTexts: readonly string[];
 	readonly #firstAudio = createDeferred();
 	readonly #finished = createDeferred();
 	#cancelled = false;
 	#signal?: AbortSignal;
 	#abortListener?: () => void;
 
-	constructor(options: AsrSessionOptions, text: string) {
+	constructor(options: AsrSessionOptions, text: string, partialTexts: readonly string[]) {
 		this.#options = options;
 		this.#text = text;
+		this.#partialTexts = partialTexts;
 	}
 
 	async start(signal: AbortSignal): Promise<void> {
@@ -78,12 +82,14 @@ class DeterministicAsrSession implements RealtimeAsrSession {
 		await this.#firstAudio.promise;
 		if (this.#cancelled) return;
 		yield { type: 'ready' };
-		yield {
-			type: 'partial',
-			segmentId: `${this.#options.sessionId}:0`,
-			revision: 0,
-			text: this.#text,
-		};
+		for (const [revision, text] of this.#partialTexts.entries()) {
+			yield {
+				type: 'partial',
+				segmentId: `${this.#options.sessionId}:0`,
+				revision,
+				text,
+			};
+		}
 		await this.#finished.promise;
 		if (this.#cancelled) return;
 		yield { type: 'completed', text: this.#text };

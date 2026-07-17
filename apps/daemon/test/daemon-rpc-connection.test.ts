@@ -8,15 +8,12 @@ import {
 	SessionCompletedNotification,
 	SessionErrorNotification,
 	SessionFinishRequest,
-	SessionRecordingNotification,
+	SessionPhaseNotification,
+	SessionPreviewNotification,
+	SessionResultsNotification,
+	SessionSelectResultRequest,
 	SessionStartRequest,
 } from '@voxspell/protocol/session';
-import {
-	AsrReadyNotification,
-	TranscriptFinalNotification,
-	TranscriptPartialNotification,
-	TranscriptSegmentFinalNotification,
-} from '@voxspell/protocol/transcript';
 import { ErrorCodes } from 'vscode-jsonrpc/node';
 
 import { DaemonRpcConnection } from '../src/rpc/daemon-rpc-connection.js';
@@ -24,19 +21,17 @@ import { SessionCoordinator } from '../src/session-coordinator.js';
 import { FakeAudioCaptureBackend } from './fakes/fake-audio-capture.js';
 import { createInMemoryRpcPair } from './fakes/in-memory-rpc.js';
 import { FakeRealtimeAsrProvider } from './fakes/fake-realtime-asr.js';
+import { FakeTextPolisher } from './fakes/fake-text-polisher.js';
 
+import type { TextPolisher } from '@voxspell/ai-polisher/text-polisher';
 import type { DaemonReadyParams } from '@voxspell/protocol/daemon';
 import type {
 	SessionCompletedParams,
 	SessionErrorParams,
-	SessionParams,
+	SessionPhaseParams,
+	SessionPreviewParams,
+	SessionResultsParams,
 } from '@voxspell/protocol/session';
-import type {
-	AsrReadyParams,
-	TranscriptFinalParams,
-	TranscriptPartialParams,
-	TranscriptSegmentFinalParams,
-} from '@voxspell/protocol/transcript';
 import type { InMemoryRpcPair } from './fakes/in-memory-rpc.js';
 
 const SESSION_ID = '0190c95b-7f28-7b12-8b6f-a4d3fd239013';
@@ -59,6 +54,7 @@ const contexts: RpcTestContext[] = [];
 
 interface TestContextOptions {
 	readonly fragmentSize?: number;
+	readonly textPolisher?: TextPolisher;
 }
 
 /** 创建已监听但尚未 initialize 的 daemon RPC 测试环境。 */
@@ -78,6 +74,7 @@ function createTestContext(options: TestContextOptions = { fragmentSize: 3 }): R
 			new SessionCoordinator({
 				captureBackend,
 				asrProvider,
+				textPolisher: options.textPolisher,
 				publish,
 				createSessionId: () => SESSION_ID,
 			}),
@@ -86,23 +83,14 @@ function createTestContext(options: TestContextOptions = { fragmentSize: 3 }): R
 	pair.client.onNotification(DaemonReadyNotification, (params: DaemonReadyParams) => {
 		notifications.push({ method: DaemonReadyNotification.method, params });
 	});
-	pair.client.onNotification(SessionRecordingNotification, (params: SessionParams) => {
-		notifications.push({ method: SessionRecordingNotification.method, params });
+	pair.client.onNotification(SessionPhaseNotification, (params: SessionPhaseParams) => {
+		notifications.push({ method: SessionPhaseNotification.method, params });
 	});
-	pair.client.onNotification(AsrReadyNotification, (params: AsrReadyParams) => {
-		notifications.push({ method: AsrReadyNotification.method, params });
+	pair.client.onNotification(SessionPreviewNotification, (params: SessionPreviewParams) => {
+		notifications.push({ method: SessionPreviewNotification.method, params });
 	});
-	pair.client.onNotification(TranscriptPartialNotification, (params: TranscriptPartialParams) => {
-		notifications.push({ method: TranscriptPartialNotification.method, params });
-	});
-	pair.client.onNotification(
-		TranscriptSegmentFinalNotification,
-		(params: TranscriptSegmentFinalParams) => {
-			notifications.push({ method: TranscriptSegmentFinalNotification.method, params });
-		},
-	);
-	pair.client.onNotification(TranscriptFinalNotification, (params: TranscriptFinalParams) => {
-		notifications.push({ method: TranscriptFinalNotification.method, params });
+	pair.client.onNotification(SessionResultsNotification, (params: SessionResultsParams) => {
+		notifications.push({ method: SessionResultsNotification.method, params });
 	});
 	pair.client.onNotification(SessionCompletedNotification, (params: SessionCompletedParams) => {
 		notifications.push({ method: SessionCompletedNotification.method, params });
@@ -261,7 +249,7 @@ describe('DaemonRpcConnection', () => {
 		).resolves.toEqual({ sessionId: SESSION_ID });
 		await vi.waitFor(() => {
 			expect(context.notifications.map((notification) => notification.method)).toContain(
-				'session.recording',
+				'session.phase',
 			);
 		});
 
@@ -282,17 +270,58 @@ describe('DaemonRpcConnection', () => {
 			context.pair.client.sendRequest(SessionFinishRequest, { sessionId: SESSION_ID }),
 		).resolves.toBeNull();
 		asr.emit({ type: 'completed', text: '你好，世界。' });
-
 		await vi.waitFor(() => {
 			expect(context.notifications.map((notification) => notification.method)).toEqual([
 				'daemon.ready',
-				'session.recording',
-				'asr.ready',
-				'transcript.partial',
-				'transcript.segmentFinal',
-				'transcript.final',
+				'session.phase',
+				'session.phase',
+				'session.preview',
+				'session.phase',
+				'session.results',
 				'session.completed',
 			]);
+		});
+	});
+
+	it('publishes polished snapshots and completes the client-selected result', async () => {
+		const polisher = new FakeTextPolisher();
+		const context = createTestContext({ textPolisher: polisher });
+		await initialize(context);
+		await context.pair.client.sendRequest(SessionStartRequest, {
+			inputContextId: 'input-context-1',
+		});
+		await context.pair.client.sendRequest(SessionFinishRequest, { sessionId: SESSION_ID });
+		context.asrProvider.sessions[0].emit({ type: 'completed', text: '识别结果' });
+		await vi.waitFor(() => expect(polisher.sessions).toHaveLength(1));
+
+		polisher.sessions[0].emit({ type: 'delta', text: '润色' });
+		polisher.sessions[0].emit({ type: 'delta', text: '结果' });
+		polisher.sessions[0].emit({ type: 'completed' });
+		await vi.waitFor(() => {
+			expect(context.notifications).toContainEqual({
+				method: 'session.results',
+				params: {
+					sessionId: SESSION_ID,
+					transcript: { text: '识别结果', status: 'final' },
+					polished: { text: '润色结果', status: 'final' },
+					recommendedChoiceId: 'polished',
+				},
+			});
+		});
+
+		await context.pair.client.sendRequest(SessionSelectResultRequest, {
+			sessionId: SESSION_ID,
+			choiceId: 'polished',
+		});
+		await vi.waitFor(() => {
+			expect(context.notifications.at(-1)).toEqual({
+				method: 'session.completed',
+				params: {
+					sessionId: SESSION_ID,
+					selectedChoiceId: 'polished',
+					text: '润色结果',
+				},
+			});
 		});
 	});
 

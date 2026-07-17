@@ -18,7 +18,10 @@ describe('deterministic runtime backends', () => {
 	});
 
 	it('emits ready, partial, and completed around audio and finish', async () => {
-		const session = await new DeterministicAsrProvider('固定文本').createSession({
+		const session = await new DeterministicAsrProvider('固定文本', [
+			'固错误文本',
+			'固定文本',
+		]).createSession({
 			sessionId: SESSION_ID,
 		});
 		const controller = new AbortController();
@@ -33,6 +36,15 @@ describe('deterministic runtime backends', () => {
 				type: 'partial',
 				segmentId: `${SESSION_ID}:0`,
 				revision: 0,
+				text: '固错误文本',
+			},
+		});
+		await expect(events.next()).resolves.toEqual({
+			done: false,
+			value: {
+				type: 'partial',
+				segmentId: `${SESSION_ID}:0`,
+				revision: 1,
 				text: '固定文本',
 			},
 		});

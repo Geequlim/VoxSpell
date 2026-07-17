@@ -5,14 +5,16 @@
 	"type": "module",
 	"sideEffects": false,
 	"exports": {
-		"./realtime-asr": "./src/realtime-asr.ts"
+		"./realtime-asr": "./src/realtime-asr.ts",
+		"./transcript-assembler": "./src/transcript-assembler.ts"
 	},
 	"dependencies": {
 		"@voxspell/protocol": "workspace:^"
 	},
 	"devDependencies": {
 		"@types/node": "24.13.3",
-		"typescript": "7.0.2"
+		"typescript": "7.0.2",
+		"vitest": "4.1.10"
 	},
 	"engines": {
 		"node": ">=24"

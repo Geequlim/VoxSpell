@@ -4,10 +4,12 @@
 	"private": true,
 	"type": "module",
 	"dependencies": {
+		"@voxspell/ai-polisher": "workspace:^",
 		"@voxspell/asr-core": "workspace:^",
 		"@voxspell/asr-openai-compatible": "workspace:^",
 		"@voxspell/config": "workspace:^",
 		"@voxspell/protocol": "workspace:^",
+		"@voxspell/text-pipeline": "workspace:^",
 		"vscode-jsonrpc": "9.0.1"
 	},
 	"devDependencies": {
