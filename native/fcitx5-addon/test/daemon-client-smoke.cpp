@@ -15,6 +15,10 @@ int main(int argc, char **argv) {
 	std::string sessionId;
 	std::string preview;
 	std::string expectedChoice = "transcript";
+	std::string preparingSessionId;
+	bool sawPreparing = false;
+	bool sawRecording = false;
+	bool sawRecognizing = false;
 	bool sawProcessing = false;
 	bool sawResults = false;
 	bool selectionSent = false;
@@ -25,13 +29,25 @@ int main(int argc, char **argv) {
 		eventLoop,
 		voxspell::DaemonClient::Callbacks{
 			.started = [&](const std::string &startedSessionId) {
+				if (!sawPreparing || preparingSessionId != startedSessionId) {
+					failed = true;
+					eventLoop.exit();
+					return;
+				}
 				sessionId = startedSessionId;
 				if (scenario != "realtime") {
 					client->finish(sessionId);
 				}
 			},
 			.phase = [&](const voxspell::protocol::SessionPhaseParams &params) {
+				if (params.phase == "preparing" && sessionId.empty()) {
+					sawPreparing = true;
+					preparingSessionId = params.sessionId;
+					return;
+				}
 				if (params.sessionId != sessionId) return;
+				sawRecording = sawRecording || params.phase == "recording";
+				sawRecognizing = sawRecognizing || params.phase == "recognizing";
 				sawProcessing = sawProcessing || params.phase == "processing";
 			},
 			.preview = [&](const voxspell::protocol::SessionPreviewParams &params) {
@@ -58,7 +74,8 @@ int main(int argc, char **argv) {
 				}
 			},
 			.completed = [&](const voxspell::protocol::SessionCompletedParams &params) {
-				completed = params.sessionId == sessionId && sawProcessing &&
+				completed = params.sessionId == sessionId && sawRecording &&
+					sawRecognizing && sawProcessing &&
 					sawResults && params.selectedChoiceId == expectedChoice &&
 					!params.text.empty();
 				eventLoop.exit();

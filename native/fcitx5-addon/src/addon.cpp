@@ -35,7 +35,8 @@ namespace {
 
 constexpr char configFile[] = "conf/voxspell.conf";
 constexpr char connectingMessage[] = "VoxSpell · 正在连接语音服务…";
-constexpr char recordingMessage[] = "VoxSpell · 正在录音";
+constexpr char preparingMessage[] = "VoxSpell · 正在准备…";
+constexpr char recordingMessage[] = "VoxSpell · 请开始讲话";
 constexpr char recognizingMessage[] = "VoxSpell · 正在识别…";
 constexpr char processingMessage[] = "VoxSpell · 正在处理…";
 constexpr char polishingMessage[] = "VoxSpell · 正在润色…";
@@ -455,6 +456,7 @@ private:
 		cancelVoiceSession(nullptr, "replaced");
 		voiceInputContext_ = inputContext->watch();
 		voiceSessionId_.clear();
+		startPending_ = true;
 		sessionPhase_.clear();
 		previewText_.clear();
 		transcriptResult_.reset();
@@ -467,7 +469,7 @@ private:
 		committed_ = false;
 		setVoicePanel(
 			inputContext,
-			daemonClient_->ready() ? recordingMessage : connectingMessage,
+			connectingMessage,
 			activeHint,
 			{},
 			nullptr);
@@ -491,12 +493,8 @@ private:
 			return;
 		}
 		finishRequested_ = true;
-		setVoicePanel(
-			inputContext,
-			recognizingMessage,
-			finishingHint,
-			previewText_,
-			nullptr);
+		sessionPhase_ = "recognizing";
+		renderCurrentVoiceState();
 		if (!voiceSessionId_.empty()) {
 			daemonClient_->finish(voiceSessionId_);
 		}
@@ -552,8 +550,12 @@ private:
 			return;
 		}
 
-		const char *status = recordingMessage;
-		if (sessionPhase_ == "recognizing") {
+		const char *status = connectingMessage;
+		if (sessionPhase_ == "preparing") {
+			status = preparingMessage;
+		} else if (sessionPhase_ == "recording") {
+			status = recordingMessage;
+		} else if (sessionPhase_ == "recognizing") {
 			status = recognizingMessage;
 		} else if (sessionPhase_ == "processing") {
 			status = processingMessage;
@@ -562,8 +564,16 @@ private:
 		} else if (sessionPhase_ == "choosing") {
 			status = choosingMessage;
 		}
-		const auto *hint = finishRequested_ ? finishingHint : activeHint;
-		setVoicePanel(inputContext, status, hint, previewText_, nullptr);
+		const auto *hint = sessionPhase_ == "recording" ? activeHint : finishingHint;
+		std::unique_ptr<fcitx::CandidateList> candidates;
+		if (!previewText_.empty()) {
+			auto preview = std::make_unique<fcitx::DisplayOnlyCandidateList>();
+			preview->setContent(std::vector<std::string>{previewText_});
+			preview->setCursorIndex(0);
+			preview->setLayoutHint(fcitx::CandidateLayoutHint::Vertical);
+			candidates = std::move(preview);
+		}
+		setVoicePanel(inputContext, status, hint, {}, std::move(candidates));
 	}
 
 	void renderResults(fcitx::InputContext *inputContext) {
@@ -665,8 +675,8 @@ private:
 		}
 		setVoicePanel(
 			inputContext,
-			recordingMessage,
-			activeHint,
+			connectingMessage,
+			finishingHint,
 			{},
 			nullptr);
 	}
@@ -677,7 +687,13 @@ private:
 			daemonClient_->cancel(sessionId, "focus-lost");
 			return;
 		}
+		if (!voiceSessionId_.empty() && voiceSessionId_ != sessionId) {
+			daemonClient_->cancel(sessionId, "client-disconnected");
+			handleDaemonError(voiceSessionId_);
+			return;
+		}
 		voiceSessionId_ = sessionId;
+		startPending_ = false;
 		if (finishRequested_) {
 			daemonClient_->finish(voiceSessionId_);
 		}
@@ -685,7 +701,14 @@ private:
 
 	void handlePhase(const protocol::SessionPhaseParams &params) {
 		auto *inputContext = voiceInputContext_.get();
-		if (!inputContext || params.sessionId != voiceSessionId_) {
+		if (!inputContext) {
+			return;
+		}
+		if (voiceSessionId_.empty() && startPending_ &&
+			params.phase == "preparing") {
+			voiceSessionId_ = params.sessionId;
+		}
+		if (params.sessionId != voiceSessionId_) {
 			return;
 		}
 		sessionPhase_ = params.phase;
@@ -755,6 +778,9 @@ private:
 	}
 
 	void handleSessionError(const protocol::SessionErrorParams &params) {
+		if (voiceSessionId_.empty() && startPending_) {
+			voiceSessionId_ = params.sessionId;
+		}
 		if (params.sessionId != voiceSessionId_) {
 			return;
 		}
@@ -805,6 +831,7 @@ private:
 
 	void clearVoiceSessionState() {
 		voiceSessionId_.clear();
+		startPending_ = false;
 		sessionPhase_.clear();
 		previewText_.clear();
 		transcriptResult_.reset();
@@ -855,6 +882,7 @@ private:
 	std::unique_ptr<DaemonClient> daemonClient_;
 	fcitx::TrackableObjectReference<fcitx::InputContext> voiceInputContext_;
 	std::string voiceSessionId_;
+	bool startPending_ = false;
 	std::string sessionPhase_;
 	std::string previewText_;
 	std::optional<protocol::TranscriptResult> transcriptResult_;

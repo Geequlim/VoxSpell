@@ -34,8 +34,10 @@ const mode = readOption('mode', 'realtime');
 if (!['realtime', 'batch', 'polish'].includes(mode)) {
 	throw new Error('mode must be realtime, batch, or polish');
 }
-const firstDelayMs = readNumberOption('first-delay-ms', 1500);
-const intervalMs = readNumberOption('interval-ms', 350);
+const firstDelayMs = readNumberOption('first-delay-ms', 2000);
+const intervalMs = readNumberOption('interval-ms', 2000);
+const phaseDelayMs = readNumberOption('phase-delay-ms', 2000);
+const prepareDelayMs = readNumberOption('prepare-delay-ms', 2000);
 const runtimeDirectory = process.env.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid()}`;
 const socketPath = process.env.VOXSPELL_SOCKET_PATH ?? join(runtimeDirectory, 'voxspell', 'daemon.sock');
 
@@ -79,6 +81,14 @@ function createConnection(socket) {
 
 	function respond(request, result) {
 		send({ jsonrpc: '2.0', result, id: request.id });
+	}
+
+	function reject(request, message) {
+		send({
+			jsonrpc: '2.0',
+			error: { code: -32600, message },
+			id: request.id,
+		});
 	}
 
 	function notify(method, params) {
@@ -127,7 +137,7 @@ function createConnection(socket) {
 			transcript: { text: transcriptText, status: 'final' },
 			recommendedChoiceId: 'transcript',
 		});
-		schedule(() => complete('transcript', transcriptText), 250);
+		schedule(() => complete('transcript', transcriptText), phaseDelayMs);
 	}
 
 	function emitPolished(index = 0) {
@@ -143,40 +153,41 @@ function createConnection(socket) {
 			...(final ? { recommendedChoiceId: 'polished' } : {}),
 		});
 		if (final) {
+			session.choosingAt = Date.now();
 			notify('session.phase', { sessionId: session.id, phase: 'choosing' });
 		} else {
 			schedule(() => emitPolished(index + 1), intervalMs);
 		}
 	}
 
-	function beginPolishing() {
+	function publishTranscriptAndPolish() {
 		if (!session) return;
 		notify('session.phase', { sessionId: session.id, phase: 'processing' });
 		notify('session.results', {
 			sessionId: session.id,
 			transcript: { text: transcriptText, status: 'final' },
 		});
-		notify('session.phase', { sessionId: session.id, phase: 'polishing' });
-		schedule(emitPolished, intervalMs);
+		schedule(() => {
+			if (!session) return;
+			notify('session.phase', { sessionId: session.id, phase: 'polishing' });
+			schedule(emitPolished, phaseDelayMs);
+		}, phaseDelayMs);
 	}
 
 	function finishSession() {
 		if (!session || session.finishing) return;
 		session.finishing = true;
 		clearTimers();
-		if (mode === 'batch') {
+		const delay = Math.max(0, session.recordingAt + phaseDelayMs - Date.now());
+		schedule(() => {
+			if (!session) return;
 			notify('session.phase', { sessionId: session.id, phase: 'recognizing' });
-			schedule(publishTranscriptAndComplete, firstDelayMs);
-			return;
-		}
-		if (mode === 'polish') {
-			schedule(beginPolishing, Math.min(intervalMs, 250));
-			return;
-		}
-		schedule(
-			publishTranscriptAndComplete,
-			Math.max(0, session.firstPreviewAt - Date.now()),
-		);
+			if (mode === 'polish') {
+				schedule(publishTranscriptAndPolish, phaseDelayMs);
+				return;
+			}
+			schedule(publishTranscriptAndComplete, phaseDelayMs);
+		}, delay);
 	}
 
 	function handleMessage(request) {
@@ -202,26 +213,28 @@ function createConnection(socket) {
 			}
 			case 'session.start': {
 				if (!initialized || session) {
-					send({
-						jsonrpc: '2.0',
-						error: { code: -32600, message: 'Session cannot be started' },
-						id: request.id,
-					});
+					reject(request, 'Session cannot be started');
 					return;
 				}
 				const id = randomUUID();
 				session = {
 					id,
 					finishing: false,
-					firstPreviewAt: Date.now() + firstDelayMs,
+					started: false,
+					startRequest: request,
 					timers: new Set(),
 				};
-				respond(request, { sessionId: id });
-				notify('session.phase', { sessionId: id, phase: 'recording' });
-				if (mode !== 'batch') {
-					notify('session.phase', { sessionId: id, phase: 'recognizing' });
-					schedule(emitPreview, firstDelayMs);
-				}
+				notify('session.phase', { sessionId: id, phase: 'preparing' });
+				schedule(() => {
+					if (!session || session.id !== id) return;
+					session.started = true;
+					session.recordingAt = Date.now();
+					respond(request, { sessionId: id });
+					notify('session.phase', { sessionId: id, phase: 'recording' });
+					if (mode !== 'batch') {
+						schedule(emitPreview, firstDelayMs);
+					}
+				}, prepareDelayMs);
 				return;
 			}
 			case 'session.finish':
@@ -233,13 +246,19 @@ function createConnection(socket) {
 				if (request.params?.sessionId !== session?.id) return;
 				const choiceId = request.params.choiceId;
 				const text = choiceId === 'polished' ? polishedSnapshots.at(-1) : transcriptText;
+				const delay = session.choosingAt
+					? Math.max(0, session.choosingAt + phaseDelayMs - Date.now())
+					: 100;
 				clearTimers();
-				schedule(() => complete(choiceId, text), 100);
+				schedule(() => complete(choiceId, text), delay);
 				return;
 			}
 			case 'session.cancel':
 				respond(request, null);
 				if (request.params?.sessionId === session?.id) {
+					if (!session.started) {
+						reject(session.startRequest, 'Session was cancelled while preparing');
+					}
 					clearTimers();
 					session = undefined;
 				}
@@ -267,7 +286,9 @@ server.on('error', (error) => {
 });
 server.listen(socketPath, () => {
 	console.log(`[voxspell-mock] listening on ${socketPath}`);
-	console.log(`[voxspell-mock] mode=${mode}, first delay=${firstDelayMs}ms`);
+	console.log(
+		`[voxspell-mock] mode=${mode}, prepare delay=${prepareDelayMs}ms, phase delay=${phaseDelayMs}ms, first delay=${firstDelayMs}ms, interval=${intervalMs}ms`,
+	);
 });
 
 async function shutdown() {

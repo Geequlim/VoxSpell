@@ -21,7 +21,14 @@ async function runScenario(scenario) {
 	const environment = { ...process.env, XDG_RUNTIME_DIR: testDirectory };
 	const daemon = spawn(
 		process.execPath,
-		[mockDaemon, `--mode=${scenario.daemon}`, '--first-delay-ms=500', '--interval-ms=150'],
+		[
+			mockDaemon,
+			`--mode=${scenario.daemon}`,
+			'--prepare-delay-ms=100',
+			'--first-delay-ms=500',
+			'--interval-ms=150',
+			'--phase-delay-ms=100',
+		],
 		{ env: environment, stdio: ['ignore', 'pipe', 'inherit'] },
 	);
 
