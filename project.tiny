@@ -8,10 +8,14 @@ develop:
       command: yarn --cwd apps/daemon node --enable-source-maps dist/index.cjs
     - name: test
       description: 执行单元测试
-      command: yarn --cwd apps/daemon vitest run
+      command:
+        - yarn --cwd packages/protocol vitest run
+        - yarn --cwd apps/daemon vitest run
     - name: typecheck
       description: 执行 TypeScript 类型检查
-      command: yarn --cwd apps/daemon tsc --noEmit
+      command:
+        - yarn --cwd packages/protocol tsc --noEmit
+        - yarn --cwd apps/daemon tsc --noEmit
     - name: lint
       description: 使用 Oxlint 执行静态代码分析
       command: yarn oxlint -c oxlint.config.mts -f stylish apps packages
@@ -26,6 +30,10 @@ develop:
         - name: check
           description: 检查代码格式
           command: yarn oxfmt --check apps packages
+    - name: fix-worktree
+      description: 规范化工作区
+      tooltip: 只处理未暂存的新增和修改文件
+      command: yarn tiny hooks run fix-worktree
 
 publish:
   actions:
@@ -44,3 +52,25 @@ tools:
           command:
           - yarn tiny-docs -c docs/configs.yaml publish dist/docs
           - yarn http-server dist/docs -c-1 -o
+
+variables:
+  allTsHookFiles: &all_ts_hook_files
+    include:
+      - "*.{ts,tsx,mts,cts}"
+      - "apps/**/*.{ts,tsx,mts,cts}"
+      - "packages/**/*.{ts,tsx,mts,cts}"
+    exclude:
+      - "**/*.d.ts"
+
+hooks:
+  fix-worktree:
+    - name: oxlint
+      command: yarn oxlint -c oxlint.config.mts -f stylish --fix
+      files:
+        <<: *all_ts_hook_files
+        source: changed
+    - name: oxfmt
+      command: yarn oxfmt
+      files:
+        <<: *all_ts_hook_files
+        source: changed

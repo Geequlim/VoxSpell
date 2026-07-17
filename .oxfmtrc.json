@@ -1,4 +1,9 @@
 {
 	"$schema": "./node_modules/oxfmt/configuration_schema.json",
-	"semi": true
+	"bracketSpacing": true,
+	"insertFinalNewline": true,
+	"semi": true,
+	"singleQuote": true,
+	"tabWidth": 4,
+	"useTabs": true
 }
