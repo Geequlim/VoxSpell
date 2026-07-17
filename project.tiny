@@ -10,6 +10,27 @@ develop:
     - name: start
       description: 运行已构建的 daemon bundle
       command: yarn --cwd apps/daemon node --enable-source-maps dist/index.cjs
+    - name: integration
+      description: 安装 Fcitx addon 并启动确定性 daemon 联调完整输入流程
+      command:
+        - yarn tiny install-fcitx5-addon
+        - yarn tiny dev
+      actions:
+        - name: tencent
+          description: 安装 Fcitx addon 并启动腾讯云实时 ASR 联调
+          command:
+            - yarn tiny install-fcitx5-addon
+            - VOXSPELL_ASR_PROVIDER=tencent yarn tiny dev/asr
+        - name: openrouter
+          description: 安装 Fcitx addon 并启动 OpenRouter ASR 联调
+          command:
+            - yarn tiny install-fcitx5-addon
+            - VOXSPELL_ASR_PROVIDER=openrouter yarn tiny dev/asr
+        - name: glm
+          description: 安装 Fcitx addon 并启动 GLM ASR 联调
+          command:
+            - yarn tiny install-fcitx5-addon
+            - VOXSPELL_ASR_PROVIDER=glm yarn tiny dev/asr
     - name: mock-daemon
       description: 启动供 C++ 扩展联调的延迟测试 daemon
       command: node native/fcitx5-addon/test/mock-daemon/mock-daemon.mjs
