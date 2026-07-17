@@ -8,6 +8,23 @@ export interface ResolvedOpenAiCompatibleTranscriptionProvider {
 	readonly model: string;
 }
 
+export interface ResolvedTencentRealtimeProvider {
+	readonly id: string;
+	readonly type: 'tencent-realtime';
+	readonly appId: string;
+	readonly secretId: string;
+	readonly secretKey: string;
+	readonly engineModelType: string;
+}
+
+export type ResolvedAsrProvider =
+	| ResolvedOpenAiCompatibleTranscriptionProvider
+	| ResolvedTencentRealtimeProvider;
+
+const TENCENT_APP_ID_ENVIRONMENT = 'TENCENT_CLOUD_ASR_APPID';
+const TENCENT_SECRET_ID_ENVIRONMENT = 'TENCENT_CLOUD_ASR_SECRET_ID';
+const TENCENT_SECRET_KEY_ENVIRONMENT = 'TENCENT_CLOUD_ASR_SECRET_KEY';
+
 /** 表示 ASR Provider 配置或密钥引用无法解析。 */
 export class AsrProviderConfigError extends Error {
 	constructor(message: string) {
@@ -21,9 +38,31 @@ export function resolveAsrProvider(
 	config: VoxSpellConfig,
 	environment: NodeJS.ProcessEnv,
 	providerId = config.asr.activeProvider,
-): ResolvedOpenAiCompatibleTranscriptionProvider {
+): ResolvedAsrProvider {
 	const provider = config.asr.providers.find((candidate) => candidate.id === providerId);
 	if (!provider) throw new AsrProviderConfigError(`ASR provider does not exist: ${providerId}`);
+	if (provider.type === 'tencent-realtime') {
+		const appId = getRequiredEnvironment(environment, TENCENT_APP_ID_ENVIRONMENT, provider.id);
+		const secretId = getRequiredEnvironment(
+			environment,
+			TENCENT_SECRET_ID_ENVIRONMENT,
+			provider.id,
+		);
+		const secretKey = getRequiredEnvironment(
+			environment,
+			TENCENT_SECRET_KEY_ENVIRONMENT,
+			provider.id,
+		);
+		return {
+			id: provider.id,
+			type: provider.type,
+			appId,
+			secretId,
+			secretKey,
+			engineModelType: provider.engineModelType,
+		};
+	}
+
 	const apiKey = environment[provider.apiKeyEnvironment];
 	if (!apiKey) {
 		throw new AsrProviderConfigError(
@@ -37,4 +76,17 @@ export function resolveAsrProvider(
 		apiKey,
 		model: provider.model,
 	};
+}
+
+/** 读取 Provider 必需的环境变量，但不把密钥值写入错误。 */
+function getRequiredEnvironment(
+	environment: NodeJS.ProcessEnv,
+	name: string,
+	providerId: string,
+): string {
+	const value = environment[name];
+	if (value) return value;
+	throw new AsrProviderConfigError(
+		`ASR provider ${providerId} requires environment variable ${name}`,
+	);
 }

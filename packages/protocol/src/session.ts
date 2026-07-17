@@ -9,6 +9,7 @@ import type { EmptyResult } from './common.js';
 import type { ProtocolErrorData } from './errors.js';
 
 export const SessionPhaseSchema = Type.Union([
+	Type.Literal('preparing'),
 	Type.Literal('recording'),
 	Type.Literal('recognizing'),
 	Type.Literal('processing'),

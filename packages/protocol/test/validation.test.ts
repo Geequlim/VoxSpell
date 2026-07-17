@@ -1,7 +1,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import { InitializeParamsSchema } from '../src/initialize.js';
-import { SessionSelectResultParamsSchema } from '../src/session.js';
+import { SessionPhaseParamsSchema, SessionSelectResultParamsSchema } from '../src/session.js';
 import { ProtocolValidationError, validateProtocolValue } from '../src/validation.js';
 
 import type { InitializeParams } from '../src/initialize.js';
@@ -54,5 +54,14 @@ describe('validateProtocolValue', () => {
 				]),
 			);
 		}
+	});
+
+	it('accepts preparing as a client-visible session phase', () => {
+		expect(
+			validateProtocolValue(SessionPhaseParamsSchema, {
+				sessionId: SESSION_ID,
+				phase: 'preparing',
+			}),
+		).toEqual({ sessionId: SESSION_ID, phase: 'preparing' });
 	});
 });

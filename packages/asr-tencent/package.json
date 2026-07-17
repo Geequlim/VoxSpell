@@ -1,0 +1,25 @@
+{
+	"name": "@voxspell/asr-tencent",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"sideEffects": false,
+	"exports": {
+		"./tencent-asr-provider": "./src/tencent-asr-provider.ts",
+		"./tencent-signature": "./src/tencent-signature.ts"
+	},
+	"dependencies": {
+		"@sinclair/typebox": "0.34.52",
+		"@voxspell/asr-core": "workspace:^",
+		"ws": "8.21.1"
+	},
+	"devDependencies": {
+		"@types/node": "24.13.3",
+		"@types/ws": "8.18.1",
+		"typescript": "7.0.2",
+		"vitest": "4.1.10"
+	},
+	"engines": {
+		"node": ">=24"
+	}
+}

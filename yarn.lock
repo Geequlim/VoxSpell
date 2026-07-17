@@ -1740,6 +1740,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@types/node@npm:*":
+  version: 26.1.1
+  resolution: "@types/node@npm:26.1.1"
+  dependencies:
+    undici-types: "npm:~8.3.0"
+  checksum: 10c0/25ac5093195736dd074d5027adbba85617bc951d5a41506ebd3b9073048acb7233613f3822d5f9b9447f9c0841c91f6387c46283916767e3ef79f23917452c46
+  languageName: node
+  linkType: hard
+
 "@types/node@npm:24.13.3":
   version: 24.13.3
   resolution: "@types/node@npm:24.13.3"
@@ -1769,6 +1778,15 @@ __metadata:
   version: 2.0.11
   resolution: "@types/unist@npm:2.0.11"
   checksum: 10c0/24dcdf25a168f453bb70298145eb043cfdbb82472db0bc0b56d6d51cd2e484b9ed8271d4ac93000a80da568f2402e9339723db262d0869e2bf13bc58e081768d
+  languageName: node
+  linkType: hard
+
+"@types/ws@npm:8.18.1":
+  version: 8.18.1
+  resolution: "@types/ws@npm:8.18.1"
+  dependencies:
+    "@types/node": "npm:*"
+  checksum: 10c0/61aff1129143fcc4312f083bc9e9e168aa3026b7dd6e70796276dcfb2c8211c4292603f9c4864fae702f2ed86e4abd4d38aa421831c2fd7f856c931a481afbab
   languageName: node
   linkType: hard
 
@@ -2034,6 +2052,20 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@voxspell/asr-tencent@workspace:^, @voxspell/asr-tencent@workspace:packages/asr-tencent":
+  version: 0.0.0-use.local
+  resolution: "@voxspell/asr-tencent@workspace:packages/asr-tencent"
+  dependencies:
+    "@sinclair/typebox": "npm:0.34.52"
+    "@types/node": "npm:24.13.3"
+    "@types/ws": "npm:8.18.1"
+    "@voxspell/asr-core": "workspace:^"
+    typescript: "npm:7.0.2"
+    vitest: "npm:4.1.10"
+    ws: "npm:8.21.1"
+  languageName: unknown
+  linkType: soft
+
 "@voxspell/config@workspace:^, @voxspell/config@workspace:packages/config":
   version: 0.0.0-use.local
   resolution: "@voxspell/config@workspace:packages/config"
@@ -2056,6 +2088,7 @@ __metadata:
     "@voxspell/ai-polisher": "workspace:^"
     "@voxspell/asr-core": "workspace:^"
     "@voxspell/asr-openai-compatible": "workspace:^"
+    "@voxspell/asr-tencent": "workspace:^"
     "@voxspell/config": "workspace:^"
     "@voxspell/protocol": "workspace:^"
     "@voxspell/text-pipeline": "workspace:^"
@@ -7405,6 +7438,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"undici-types@npm:~8.3.0":
+  version: 8.3.0
+  resolution: "undici-types@npm:8.3.0"
+  checksum: 10c0/c8aa7e2fbebfce519654dafadc0ece59be888d2ccaf180fb4495da875e7b536d2456345c384069c7e6f3e9c9ab7435f074957da306f142343eee86ff8048855a
+  languageName: node
+  linkType: hard
+
 "undici@npm:^8.4.1":
   version: 8.7.0
   resolution: "undici@npm:8.7.0"
@@ -7763,7 +7803,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"ws@npm:^8.20.0":
+"ws@npm:8.21.1, ws@npm:^8.20.0":
   version: 8.21.1
   resolution: "ws@npm:8.21.1"
   peerDependencies:

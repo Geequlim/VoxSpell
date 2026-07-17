@@ -26,6 +26,7 @@ develop:
         - yarn --cwd packages/asr-core vitest run
         - yarn --cwd packages/config vitest run
         - yarn --cwd packages/asr-openai-compatible vitest run
+        - yarn --cwd packages/asr-tencent vitest run
         - yarn --cwd apps/daemon vitest run
       actions:
         - name: fcitx5-addon
@@ -43,10 +44,15 @@ develop:
             - yarn --cwd apps/daemon rspack build
             - VOXSPELL_CONFIG_PATH=../../configs/config.yaml yarn --cwd apps/daemon node --enable-source-maps dist/asr-fixtures-smoke.cjs
         - name: asr-microphone
-          description: 录制麦克风后请求真实 ASR Provider
+          description: 录制麦克风并显示真实 ASR Provider 的实时识别结果
           command:
             - yarn --cwd apps/daemon rspack build
             - VOXSPELL_CONFIG_PATH=../../configs/config.yaml yarn --cwd apps/daemon node --enable-source-maps dist/asr-microphone-smoke.cjs
+        - name: asr-tencent
+          description: 使用腾讯云实时 ASR 录制麦克风并显示实时结果
+          command:
+            - yarn --cwd apps/daemon rspack build
+            - VOXSPELL_ASR_PROVIDER=tencent VOXSPELL_CONFIG_PATH=../../configs/config.yaml yarn --cwd apps/daemon node --enable-source-maps dist/asr-microphone-smoke.cjs
     - name: audio-smoke
       description: 录制麦克风并显示实时音量
       command:
@@ -60,6 +66,7 @@ develop:
         - yarn --cwd packages/ai-polisher tsc --noEmit
         - yarn --cwd packages/config tsc --noEmit
         - yarn --cwd packages/asr-openai-compatible tsc --noEmit
+        - yarn --cwd packages/asr-tencent tsc --noEmit
         - yarn --cwd packages/text-pipeline tsc --noEmit
         - yarn --cwd apps/daemon tsc --noEmit
     - name: lint

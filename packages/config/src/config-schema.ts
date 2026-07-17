@@ -17,13 +17,29 @@ export type OpenAiCompatibleTranscriptionProviderConfig = Static<
 	typeof OpenAiCompatibleTranscriptionProviderConfigSchema
 >;
 
+export const TencentRealtimeProviderConfigSchema = Type.Object(
+	{
+		id: Type.String({ minLength: 1 }),
+		type: Type.Literal('tencent-realtime'),
+		engineModelType: Type.String({ minLength: 1 }),
+	},
+	{ additionalProperties: false },
+);
+export type TencentRealtimeProviderConfig = Static<typeof TencentRealtimeProviderConfigSchema>;
+
+export const AsrProviderConfigSchema = Type.Union([
+	OpenAiCompatibleTranscriptionProviderConfigSchema,
+	TencentRealtimeProviderConfigSchema,
+]);
+export type AsrProviderConfig = Static<typeof AsrProviderConfigSchema>;
+
 export const VoxSpellConfigSchema = Type.Object(
 	{
 		version: Type.Literal(1),
 		asr: Type.Object(
 			{
 				activeProvider: Type.String({ minLength: 1 }),
-				providers: Type.Array(OpenAiCompatibleTranscriptionProviderConfigSchema, {
+				providers: Type.Array(AsrProviderConfigSchema, {
 					minItems: 1,
 				}),
 			},

@@ -56,4 +56,35 @@ describe('VoxSpell config', () => {
 		const config = parseVoxSpellConfig(validConfig);
 		expect(() => resolveAsrProvider(config, {})).toThrow(AsrProviderConfigError);
 	});
+
+	it('resolves Tencent realtime credentials from the fixed environment variables', () => {
+		const config = parseVoxSpellConfig({
+			version: 1,
+			asr: {
+				activeProvider: 'tencent',
+				providers: [
+					{
+						id: 'tencent',
+						type: 'tencent-realtime',
+						engineModelType: '16k_zh_en',
+					},
+				],
+			},
+		});
+
+		expect(
+			resolveAsrProvider(config, {
+				TENCENT_CLOUD_ASR_APPID: '123456',
+				TENCENT_CLOUD_ASR_SECRET_ID: 'secret-id',
+				TENCENT_CLOUD_ASR_SECRET_KEY: 'secret-key',
+			}),
+		).toEqual({
+			id: 'tencent',
+			type: 'tencent-realtime',
+			appId: '123456',
+			secretId: 'secret-id',
+			secretKey: 'secret-key',
+			engineModelType: '16k_zh_en',
+		});
+	});
 });

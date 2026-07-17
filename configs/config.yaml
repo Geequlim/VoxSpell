@@ -14,3 +14,7 @@ asr:
       baseUrl: https://open.bigmodel.cn/api/paas/v4
       apiKeyEnvironment: GLM_API_KEY
       model: glm-asr-2512
+
+    - id: tencent
+      type: tencent-realtime
+      engineModelType: 16k_zh
