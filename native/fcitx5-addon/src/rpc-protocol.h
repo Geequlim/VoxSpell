@@ -3,6 +3,7 @@
 #include <glaze/ext/jsonrpc.hpp>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace voxspell::protocol {
@@ -49,51 +50,59 @@ struct SessionCancelParams {
 	std::string reason;
 };
 
+struct SessionSelectResultParams {
+	std::string sessionId;
+	std::string choiceId;
+};
+
 struct DaemonReadyParams {
 	ServiceInfo serverInfo;
 	ServerCapabilities capabilities;
 };
 
-struct TranscriptPartialParams {
+struct SessionPhaseParams {
 	std::string sessionId;
-	std::string segmentId;
-	std::int64_t revision = 0;
+	std::string phase;
+};
+
+struct SessionPreviewParams {
+	std::string sessionId;
 	std::string text;
 };
 
-struct AsrReadyParams {
-	std::string sessionId;
-	std::string providerId;
+struct TranscriptResult {
+	std::string text;
+	std::string status;
 };
 
-struct TranscriptSegmentFinalParams {
-	std::string sessionId;
-	std::string segmentId;
+struct PolishedResult {
 	std::string text;
+	std::string status;
 };
 
-struct TranscriptFinalParams {
+struct SessionResultsParams {
 	std::string sessionId;
-	std::string text;
+	TranscriptResult transcript;
+	std::optional<PolishedResult> polished;
+	std::optional<std::string> recommendedChoiceId;
 };
 
 struct SessionCompletedParams {
 	std::string sessionId;
+	std::string selectedChoiceId;
 	std::string text;
 };
 
 struct ProtocolErrorData {
 	std::string code;
-	std::string message;
+	std::string stage;
+	bool retryable = false;
+	std::optional<std::string> providerCode;
 };
 
 struct SessionErrorParams {
 	std::string sessionId;
 	ProtocolErrorData error;
-};
-
-struct MessageHeader {
-	std::string method;
 };
 
 using InitializeMethod =
@@ -104,21 +113,19 @@ using SessionFinishMethod =
 	glz::rpc::method<"session.finish", SessionParams, EmptyObject>;
 using SessionCancelMethod =
 	glz::rpc::method<"session.cancel", SessionCancelParams, EmptyObject>;
+using SessionSelectResultMethod = glz::rpc::method<
+	"session.selectResult",
+	SessionSelectResultParams,
+	EmptyObject>;
 
 using DaemonReadyMethod =
 	glz::rpc::method<"daemon.ready", DaemonReadyParams, EmptyObject>;
-using SessionRecordingMethod =
-	glz::rpc::method<"session.recording", SessionParams, EmptyObject>;
-using AsrReadyMethod =
-	glz::rpc::method<"asr.ready", AsrReadyParams, EmptyObject>;
-using TranscriptPartialMethod =
-	glz::rpc::method<"transcript.partial", TranscriptPartialParams, EmptyObject>;
-using TranscriptSegmentFinalMethod = glz::rpc::method<
-	"transcript.segmentFinal",
-	TranscriptSegmentFinalParams,
-	EmptyObject>;
-using TranscriptFinalMethod =
-	glz::rpc::method<"transcript.final", TranscriptFinalParams, EmptyObject>;
+using SessionPhaseMethod =
+	glz::rpc::method<"session.phase", SessionPhaseParams, EmptyObject>;
+using SessionPreviewMethod =
+	glz::rpc::method<"session.preview", SessionPreviewParams, EmptyObject>;
+using SessionResultsMethod =
+	glz::rpc::method<"session.results", SessionResultsParams, EmptyObject>;
 using SessionCompletedMethod =
 	glz::rpc::method<"session.completed", SessionCompletedParams, EmptyObject>;
 using SessionErrorMethod =
@@ -128,14 +135,13 @@ using RpcClient = glz::rpc::client<
 	InitializeMethod,
 	SessionStartMethod,
 	SessionFinishMethod,
-	SessionCancelMethod>;
+	SessionCancelMethod,
+	SessionSelectResultMethod>;
 using NotificationServer = glz::rpc::server<
 	DaemonReadyMethod,
-	SessionRecordingMethod,
-	AsrReadyMethod,
-	TranscriptPartialMethod,
-	TranscriptSegmentFinalMethod,
-	TranscriptFinalMethod,
+	SessionPhaseMethod,
+	SessionPreviewMethod,
+	SessionResultsMethod,
 	SessionCompletedMethod,
 	SessionErrorMethod>;
 

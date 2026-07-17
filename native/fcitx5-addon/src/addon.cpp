@@ -22,8 +22,11 @@
 
 #include <cstdint>
 #include <cstdlib>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace voxspell {
@@ -32,15 +35,42 @@ namespace {
 
 constexpr char configFile[] = "conf/voxspell.conf";
 constexpr char connectingMessage[] = "VoxSpell · 正在连接语音服务…";
-constexpr char waitingMessage[] = "VoxSpell · 正在听，等待识别结果…";
-constexpr char streamingMessage[] = "VoxSpell · 正在听";
-constexpr char finishingMessage[] = "VoxSpell · 正在识别…";
-constexpr char finalMessage[] = "VoxSpell · 识别完成";
-constexpr char errorMessage[] = "VoxSpell · 测试 daemon 不可用";
-constexpr char activeHint[] = "松开空格完成，Esc 取消";
+constexpr char recordingMessage[] = "VoxSpell · 正在录音";
+constexpr char recognizingMessage[] = "VoxSpell · 正在识别…";
+constexpr char processingMessage[] = "VoxSpell · 正在处理…";
+constexpr char polishingMessage[] = "VoxSpell · 正在润色…";
+constexpr char choosingMessage[] = "VoxSpell · 请选择结果";
+constexpr char submittingMessage[] = "VoxSpell · 正在提交…";
+constexpr char errorMessage[] = "VoxSpell · 本次语音输入失败";
+constexpr char activeHint[] = "松开热键完成，Esc 取消";
 constexpr char finishingHint[] = "请稍候";
-constexpr char errorHint[] = "请先运行 yarn tiny dev/mock-daemon";
+constexpr char choosingHint[] = "1 润色结果 · 2 识别结果 · Enter 确认";
+constexpr char errorHint[] = "未提交任何文本";
 constexpr std::uint64_t errorMessageDurationUs = 1600000;
+
+class ResultCandidateWord final : public fcitx::CandidateWord {
+public:
+	ResultCandidateWord(
+		std::string text,
+		std::string choiceId,
+		bool selectable,
+		std::function<void(const std::string &)> select)
+		: CandidateWord(fcitx::Text(std::move(text))),
+		  choiceId_(std::move(choiceId)),
+		  selectable_(selectable),
+		  select_(std::move(select)) {}
+
+	void select(fcitx::InputContext *) const override {
+		if (selectable_) {
+			select_(choiceId_);
+		}
+	}
+
+private:
+	std::string choiceId_;
+	bool selectable_;
+	std::function<void(const std::string &)> select_;
+};
 
 class InputContextState final : public fcitx::InputContextProperty {
 public:
@@ -48,6 +78,7 @@ public:
 	bool replaying = false;
 	bool passingInjectedSpace = false;
 	bool ownsPanel = false;
+	fcitx::KeySym swallowedSelectionKey = FcitxKey_None;
 	fcitx::Key triggerKey;
 	fcitx::Key triggerRawKey;
 	int triggerPressTime = 0;
@@ -94,15 +125,20 @@ public:
 				.started = [this](const std::string &sessionId) {
 					handleSessionStarted(sessionId);
 				},
-				.partial = [this](const protocol::TranscriptPartialParams &params) {
-					handlePartial(params);
+				.phase = [this](const protocol::SessionPhaseParams &params) {
+					handlePhase(params);
 				},
-				.finalTranscript =
-					[this](const protocol::TranscriptFinalParams &params) {
-						handleFinal(params);
-					},
+				.preview = [this](const protocol::SessionPreviewParams &params) {
+					handlePreview(params);
+				},
+				.results = [this](const protocol::SessionResultsParams &params) {
+					handleResults(params);
+				},
 				.completed = [this](const protocol::SessionCompletedParams &params) {
 					handleCompleted(params);
+				},
+				.sessionError = [this](const protocol::SessionErrorParams &params) {
+					handleSessionError(params);
 				},
 				.error = [this](const std::string &sessionId, const std::string &) {
 					handleDaemonError(sessionId);
@@ -112,6 +148,7 @@ public:
 	}
 
 	~VoxSpellAddon() override {
+		cancelVoiceSession(nullptr, "client-disconnected");
 		resetAllInputContexts();
 	}
 
@@ -144,6 +181,15 @@ private:
 			if (keyEvent.isRelease()) {
 				state->passingInjectedSpace = false;
 			}
+			return;
+		}
+		if (keyEvent.isRelease() &&
+			state->swallowedSelectionKey == keyEvent.key().sym()) {
+			state->swallowedSelectionKey = FcitxKey_None;
+			keyEvent.filterAndAccept();
+			return;
+		}
+		if (handleVoiceSelectionKey(keyEvent, *state)) {
 			return;
 		}
 
@@ -346,21 +392,94 @@ private:
 		return false;
 	}
 
+	bool handleVoiceSelectionKey(
+		fcitx::KeyEvent &keyEvent,
+		InputContextState &state) {
+		auto *inputContext = keyEvent.inputContext();
+		if (keyEvent.isRelease() || state.phase != TapHoldPhase::Idle ||
+			voiceInputContext_.get() != inputContext) {
+			return false;
+		}
+		if (keyEvent.key().check(FcitxKey_Escape)) {
+			state.swallowedSelectionKey = keyEvent.key().sym();
+			keyEvent.filterAndAccept();
+			cancelVoiceSession(inputContext, "user");
+			clearOwnPanel(inputContext);
+			return true;
+		}
+		if (config_.autoSelectResult.value() || !transcriptResult_ ||
+			!hasManualChoice()) {
+			if (!keyEvent.key().isModifier()) {
+				cancelVoiceSession(inputContext, "user");
+				clearOwnPanel(inputContext);
+			}
+			return false;
+		}
+
+		const auto swallow = [&]() {
+			state.swallowedSelectionKey = keyEvent.key().sym();
+			keyEvent.filterAndAccept();
+		};
+		if (keyEvent.key().check(FcitxKey_Up) ||
+			keyEvent.key().check(FcitxKey_Down)) {
+			selectedChoiceId_ =
+				selectedChoiceId_ == "polished" ? "transcript" : "polished";
+			renderResults(inputContext);
+			swallow();
+			return true;
+		}
+		if (keyEvent.key().check(FcitxKey_1)) {
+			selectResult("polished");
+			swallow();
+			return true;
+		}
+		if (keyEvent.key().check(FcitxKey_2)) {
+			selectResult("transcript");
+			swallow();
+			return true;
+		}
+		if (keyEvent.key().check(FcitxKey_Return) ||
+			keyEvent.key().check(FcitxKey_KP_Enter) ||
+			keyEvent.key().check(FcitxKey_space)) {
+			selectResult(selectedChoiceId_);
+			swallow();
+			return true;
+		}
+
+		cancelVoiceSession(inputContext, "user");
+		clearOwnPanel(inputContext);
+		return false;
+	}
+
 	void startVoiceSession(fcitx::InputContext *inputContext) {
 		cancelVoiceSession(nullptr, "replaced");
 		voiceInputContext_ = inputContext->watch();
 		voiceSessionId_.clear();
-		voiceTranscript_.clear();
+		sessionPhase_.clear();
+		previewText_.clear();
+		transcriptResult_.reset();
+		polishedResult_.reset();
+		recommendedChoiceId_.reset();
+		selectedChoiceId_ = "polished";
 		finishRequested_ = false;
-		voiceFailed_ = false;
+		selectionRequested_ = false;
+		sawPolishing_ = false;
 		committed_ = false;
-		renderVoicePanel(
+		setVoicePanel(
 			inputContext,
-			daemonClient_->ready() ? waitingMessage : connectingMessage,
+			daemonClient_->ready() ? recordingMessage : connectingMessage,
 			activeHint,
-			{});
-		daemonClient_->start(
-			std::to_string(reinterpret_cast<std::uintptr_t>(inputContext)));
+			{},
+			nullptr);
+
+		constexpr char hex[] = "0123456789abcdef";
+		std::string inputContextId;
+		inputContextId.reserve(inputContext->uuid().size() * 2);
+		for (const auto byte : inputContext->uuid()) {
+			inputContextId.push_back(hex[byte >> 4]);
+			inputContextId.push_back(hex[byte & 0x0f]);
+		}
+		daemonClient_->start(std::move(inputContextId));
 	}
 
 	void finishVoiceSession(
@@ -368,17 +487,16 @@ private:
 		InputContextState &state) {
 		state.holdTimer.reset();
 		state.feedbackTimer.reset();
-		finishRequested_ = true;
-		if (voiceFailed_) {
-			cancelVoiceSession(inputContext, "user");
-			showTimedError(inputContext, state);
+		if (voiceInputContext_.get() != inputContext) {
 			return;
 		}
-		renderVoicePanel(
+		finishRequested_ = true;
+		setVoicePanel(
 			inputContext,
-			finishingMessage,
+			recognizingMessage,
 			finishingHint,
-			voiceTranscript_);
+			previewText_,
+			nullptr);
 		if (!voiceSessionId_.empty()) {
 			daemonClient_->finish(voiceSessionId_);
 		}
@@ -387,7 +505,7 @@ private:
 	void showTimedError(
 		fcitx::InputContext *inputContext,
 		InputContextState &state) {
-		renderVoicePanel(inputContext, errorMessage, errorHint, {});
+		setVoicePanel(inputContext, errorMessage, errorHint, {}, nullptr);
 
 		auto inputContextReference = inputContext->watch();
 		state.feedbackTimer = instance_->eventLoop().addTimeEvent(
@@ -408,38 +526,149 @@ private:
 		state.feedbackTimer->setOneShot();
 	}
 
-	void renderVoicePanel(
+	void setVoicePanel(
 		fcitx::InputContext *inputContext,
 		const std::string &status,
 		const std::string &hint,
-		const std::string &transcript) {
+		const std::string &preedit,
+		std::unique_ptr<fcitx::CandidateList> candidates) {
 		auto *state = inputContext->propertyFor(&stateFactory_);
 		state->ownsPanel = true;
 		auto &inputPanel = inputContext->inputPanel();
 		inputPanel.setAuxUp(fcitx::Text(status));
 		inputPanel.setAuxDown(fcitx::Text(hint));
-		if (transcript.empty()) {
-			inputPanel.setCandidateList(nullptr);
-		} else {
-			auto candidates = std::make_unique<fcitx::DisplayOnlyCandidateList>();
-			candidates->setContent(std::vector<std::string>{transcript});
-			candidates->setCursorIndex(0);
-			candidates->setLayoutHint(fcitx::CandidateLayoutHint::Vertical);
-			inputPanel.setCandidateList(std::move(candidates));
-		}
+		inputPanel.setPreedit(fcitx::Text(preedit));
+		inputPanel.setCandidateList(std::move(candidates));
 		inputContext->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+	}
+
+	void renderCurrentVoiceState() {
+		auto *inputContext = voiceInputContext_.get();
+		if (!inputContext) {
+			return;
+		}
+		if (transcriptResult_) {
+			renderResults(inputContext);
+			return;
+		}
+
+		const char *status = recordingMessage;
+		if (sessionPhase_ == "recognizing") {
+			status = recognizingMessage;
+		} else if (sessionPhase_ == "processing") {
+			status = processingMessage;
+		} else if (sessionPhase_ == "polishing") {
+			status = polishingMessage;
+		} else if (sessionPhase_ == "choosing") {
+			status = choosingMessage;
+		}
+		const auto *hint = finishRequested_ ? finishingHint : activeHint;
+		setVoicePanel(inputContext, status, hint, previewText_, nullptr);
+	}
+
+	void renderResults(fcitx::InputContext *inputContext) {
+		if (config_.autoSelectResult.value()) {
+			const protocol::PolishedResult *visibleResult = nullptr;
+			if (polishedResult_) {
+				visibleResult = &*polishedResult_;
+			}
+
+			if (visibleResult && !visibleResult->text.empty()) {
+				auto candidates = std::make_unique<fcitx::DisplayOnlyCandidateList>();
+				candidates->setContent(
+					std::vector<std::string>{visibleResult->text});
+				candidates->setCursorIndex(0);
+				candidates->setLayoutHint(fcitx::CandidateLayoutHint::Vertical);
+				const auto *status = selectionRequested_
+					? submittingMessage
+					: polishingMessage;
+				setVoicePanel(
+					inputContext,
+					status,
+					finishingHint,
+					{},
+					std::move(candidates));
+				return;
+			}
+			if (!sawPolishing_ && transcriptResult_) {
+				auto candidates = std::make_unique<fcitx::DisplayOnlyCandidateList>();
+				candidates->setContent(
+					std::vector<std::string>{transcriptResult_->text});
+				candidates->setCursorIndex(0);
+				setVoicePanel(
+					inputContext,
+					processingMessage,
+					finishingHint,
+					{},
+					std::move(candidates));
+				return;
+			}
+			setVoicePanel(
+				inputContext,
+				polishingMessage,
+				finishingHint,
+				{},
+				nullptr);
+			return;
+		}
+		if (!hasManualChoice()) {
+			auto candidates = std::make_unique<fcitx::DisplayOnlyCandidateList>();
+			candidates->setContent(
+				std::vector<std::string>{transcriptResult_->text});
+			candidates->setCursorIndex(0);
+			setVoicePanel(
+				inputContext,
+				processingMessage,
+				finishingHint,
+				{},
+				std::move(candidates));
+			return;
+		}
+
+		auto candidates = std::make_unique<fcitx::CommonCandidateList>();
+		candidates->setPageSize(2);
+		candidates->setLabels({"1", "2"});
+		candidates->setLayoutHint(fcitx::CandidateLayoutHint::Vertical);
+		const bool polishedSelectable =
+			polishedResult_ && polishedResult_->status == "final";
+		std::string polishedText = "润色结果：正在润色…";
+		if (polishedResult_ && !polishedResult_->text.empty()) {
+			polishedText = "润色结果：" + polishedResult_->text;
+		}
+		candidates->append<ResultCandidateWord>(
+			polishedText,
+			"polished",
+			polishedSelectable,
+			[this](const std::string &choiceId) { selectResult(choiceId); });
+		candidates->append<ResultCandidateWord>(
+			"识别结果：" + transcriptResult_->text,
+			"transcript",
+			true,
+			[this](const std::string &choiceId) { selectResult(choiceId); });
+		candidates->setCursorIndex(selectedChoiceId_ == "transcript" ? 1 : 0);
+		setVoicePanel(
+			inputContext,
+			selectionRequested_ ? submittingMessage : choosingMessage,
+			selectionRequested_ ? finishingHint : choosingHint,
+			{},
+			std::move(candidates));
+	}
+
+	bool hasManualChoice() const {
+		return !recommendedChoiceId_ || sawPolishing_ || polishedResult_.has_value();
 	}
 
 	void handleDaemonReady() {
 		auto *inputContext = voiceInputContext_.get();
-		if (!inputContext || !voiceSessionId_.empty() || voiceFailed_) {
+		if (!inputContext || !voiceSessionId_.empty()) {
 			return;
 		}
-		renderVoicePanel(
+		setVoicePanel(
 			inputContext,
-			waitingMessage,
+			recordingMessage,
 			activeHint,
-			voiceTranscript_);
+			{},
+			nullptr);
 	}
 
 	void handleSessionStarted(const std::string &sessionId) {
@@ -454,30 +683,61 @@ private:
 		}
 	}
 
-	void handlePartial(const protocol::TranscriptPartialParams &params) {
-		auto *inputContext = voiceInputContext_.get();
-		if (!inputContext || params.sessionId != voiceSessionId_ || finishRequested_) {
-			return;
-		}
-		voiceTranscript_ = params.text;
-		renderVoicePanel(
-			inputContext,
-			streamingMessage,
-			activeHint,
-			voiceTranscript_);
-	}
-
-	void handleFinal(const protocol::TranscriptFinalParams &params) {
+	void handlePhase(const protocol::SessionPhaseParams &params) {
 		auto *inputContext = voiceInputContext_.get();
 		if (!inputContext || params.sessionId != voiceSessionId_) {
 			return;
 		}
-		voiceTranscript_ = params.text;
-		renderVoicePanel(
-			inputContext,
-			finalMessage,
-			finishingHint,
-			voiceTranscript_);
+		sessionPhase_ = params.phase;
+		if (sessionPhase_ == "polishing") {
+			sawPolishing_ = true;
+		}
+		renderCurrentVoiceState();
+	}
+
+	void handlePreview(const protocol::SessionPreviewParams &params) {
+		auto *inputContext = voiceInputContext_.get();
+		if (!inputContext || params.sessionId != voiceSessionId_) {
+			return;
+		}
+		previewText_ = params.text;
+		renderCurrentVoiceState();
+	}
+
+	void handleResults(const protocol::SessionResultsParams &params) {
+		auto *inputContext = voiceInputContext_.get();
+		if (!inputContext || params.sessionId != voiceSessionId_) {
+			return;
+		}
+		transcriptResult_ = params.transcript;
+		polishedResult_ = params.polished;
+		recommendedChoiceId_ = params.recommendedChoiceId;
+		renderResults(inputContext);
+
+		if (!config_.autoSelectResult.value() || selectionRequested_ ||
+			!recommendedChoiceId_) {
+			return;
+		}
+		if (*recommendedChoiceId_ == "polished" && polishedResult_ &&
+			polishedResult_->status == "final") {
+			selectResult("polished");
+		} else if (*recommendedChoiceId_ == "transcript" && sawPolishing_) {
+			selectResult("transcript");
+		}
+	}
+
+	void selectResult(const std::string &choiceId) {
+		if (selectionRequested_ || voiceSessionId_.empty() || !transcriptResult_) {
+			return;
+		}
+		if (choiceId == "polished" &&
+			(!polishedResult_ || polishedResult_->status != "final")) {
+			return;
+		}
+		selectionRequested_ = true;
+		selectedChoiceId_ = choiceId;
+		renderCurrentVoiceState();
+		daemonClient_->selectResult(voiceSessionId_, choiceId);
 	}
 
 	void handleCompleted(const protocol::SessionCompletedParams &params) {
@@ -491,9 +751,14 @@ private:
 		}
 		clearOwnPanel(inputContext);
 		voiceInputContext_.unwatch();
-		voiceSessionId_.clear();
-		voiceTranscript_.clear();
-		finishRequested_ = false;
+		clearVoiceSessionState();
+	}
+
+	void handleSessionError(const protocol::SessionErrorParams &params) {
+		if (params.sessionId != voiceSessionId_) {
+			return;
+		}
+		handleDaemonError(params.sessionId);
 	}
 
 	void handleDaemonError(const std::string &sessionId) {
@@ -502,8 +767,11 @@ private:
 			(!sessionId.empty() && sessionId != voiceSessionId_)) {
 			return;
 		}
-		voiceFailed_ = true;
-		renderVoicePanel(inputContext, errorMessage, errorHint, {});
+		auto *state = inputContext->propertyFor(&stateFactory_);
+		clearOwnPanel(inputContext);
+		voiceInputContext_.unwatch();
+		clearVoiceSessionState();
+		showTimedError(inputContext, *state);
 	}
 
 	void cancelVoiceSession(
@@ -514,6 +782,16 @@ private:
 			return;
 		}
 		if (!activeInputContext) {
+			if (inputContext) {
+				return;
+			}
+			if (voiceSessionId_.empty()) {
+				daemonClient_->cancelPendingStart();
+			} else {
+				daemonClient_->cancel(voiceSessionId_, std::move(reason));
+			}
+			voiceInputContext_.unwatch();
+			clearVoiceSessionState();
 			return;
 		}
 		if (voiceSessionId_.empty()) {
@@ -522,10 +800,20 @@ private:
 			daemonClient_->cancel(voiceSessionId_, std::move(reason));
 		}
 		voiceInputContext_.unwatch();
+		clearVoiceSessionState();
+	}
+
+	void clearVoiceSessionState() {
 		voiceSessionId_.clear();
-		voiceTranscript_.clear();
+		sessionPhase_.clear();
+		previewText_.clear();
+		transcriptResult_.reset();
+		polishedResult_.reset();
+		recommendedChoiceId_.reset();
+		selectedChoiceId_ = "polished";
 		finishRequested_ = false;
-		voiceFailed_ = false;
+		selectionRequested_ = false;
+		sawPolishing_ = false;
 		committed_ = false;
 	}
 
@@ -538,6 +826,7 @@ private:
 		auto &inputPanel = inputContext->inputPanel();
 		inputPanel.setAuxUp(fcitx::Text());
 		inputPanel.setAuxDown(fcitx::Text());
+		inputPanel.setPreedit(fcitx::Text());
 		inputPanel.setCandidateList(nullptr);
 		inputContext->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
 	}
@@ -547,6 +836,7 @@ private:
 		auto *state = inputContext->propertyFor(&stateFactory_);
 		state->phase = TapHoldPhase::Idle;
 		state->passingInjectedSpace = false;
+		state->swallowedSelectionKey = FcitxKey_None;
 		state->holdTimer.reset();
 		state->feedbackTimer.reset();
 		if (updateUi) {
@@ -565,9 +855,15 @@ private:
 	std::unique_ptr<DaemonClient> daemonClient_;
 	fcitx::TrackableObjectReference<fcitx::InputContext> voiceInputContext_;
 	std::string voiceSessionId_;
-	std::string voiceTranscript_;
+	std::string sessionPhase_;
+	std::string previewText_;
+	std::optional<protocol::TranscriptResult> transcriptResult_;
+	std::optional<protocol::PolishedResult> polishedResult_;
+	std::optional<std::string> recommendedChoiceId_;
+	std::string selectedChoiceId_ = "polished";
 	bool finishRequested_ = false;
-	bool voiceFailed_ = false;
+	bool selectionRequested_ = false;
+	bool sawPolishing_ = false;
 	bool committed_ = false;
 	VoxSpellConfig config_;
 	fcitx::SimpleInputContextPropertyFactory<InputContextState> stateFactory_;

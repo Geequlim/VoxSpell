@@ -18,9 +18,11 @@ public:
 	struct Callbacks {
 		std::function<void()> ready;
 		std::function<void(const std::string &)> started;
-		std::function<void(const protocol::TranscriptPartialParams &)> partial;
-		std::function<void(const protocol::TranscriptFinalParams &)> finalTranscript;
+		std::function<void(const protocol::SessionPhaseParams &)> phase;
+		std::function<void(const protocol::SessionPreviewParams &)> preview;
+		std::function<void(const protocol::SessionResultsParams &)> results;
 		std::function<void(const protocol::SessionCompletedParams &)> completed;
+		std::function<void(const protocol::SessionErrorParams &)> sessionError;
 		std::function<void(const std::string &, const std::string &)> error;
 		std::function<void()> disconnected;
 	};
@@ -36,6 +38,7 @@ public:
 	void cancelPendingStart();
 	void finish(const std::string &sessionId);
 	void cancel(const std::string &sessionId, std::string reason);
+	void selectResult(const std::string &sessionId, std::string choiceId);
 
 private:
 	enum class ConnectionState {

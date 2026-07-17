@@ -9,39 +9,62 @@
 #include <string>
 
 int main(int argc, char **argv) {
-	const bool streaming = argc > 1 && std::string(argv[1]) == "streaming";
+	const std::string scenario = argc > 1 ? argv[1] : "realtime";
 	fcitx::EventLoop eventLoop;
 	std::unique_ptr<voxspell::DaemonClient> client;
 	std::string sessionId;
-	bool sawFinal = false;
-	bool sawPartial = false;
+	std::string preview;
+	std::string expectedChoice = "transcript";
+	bool sawProcessing = false;
+	bool sawResults = false;
+	bool selectionSent = false;
 	bool completed = false;
 	bool failed = false;
-	bool finishSent = false;
 
 	client = std::make_unique<voxspell::DaemonClient>(
 		eventLoop,
 		voxspell::DaemonClient::Callbacks{
 			.started = [&](const std::string &startedSessionId) {
 				sessionId = startedSessionId;
-				if (!streaming) {
-					finishSent = true;
+				if (scenario != "realtime") {
 					client->finish(sessionId);
 				}
 			},
-			.partial = [&](const voxspell::protocol::TranscriptPartialParams &params) {
-				sawPartial = params.sessionId == sessionId && !params.text.empty();
-				if (streaming && sawPartial && params.revision >= 2 && !finishSent) {
-					finishSent = true;
+			.phase = [&](const voxspell::protocol::SessionPhaseParams &params) {
+				if (params.sessionId != sessionId) return;
+				sawProcessing = sawProcessing || params.phase == "processing";
+			},
+			.preview = [&](const voxspell::protocol::SessionPreviewParams &params) {
+				if (params.sessionId != sessionId) return;
+				preview = params.text;
+				if (scenario == "realtime" &&
+					preview == "今天下午三点我们开会") {
 					client->finish(sessionId);
 				}
 			},
-			.finalTranscript = [&](const voxspell::protocol::TranscriptFinalParams &params) {
-				sawFinal = params.sessionId == sessionId && !params.text.empty();
+			.results = [&](const voxspell::protocol::SessionResultsParams &params) {
+				if (params.sessionId != sessionId) return;
+				sawResults = params.transcript.status == "final";
+				if (scenario == "polish-transcript" && params.polished &&
+					params.polished->status == "streaming" && !selectionSent) {
+					selectionSent = true;
+					expectedChoice = "transcript";
+					client->selectResult(sessionId, expectedChoice);
+				} else if (scenario == "polish" && params.polished &&
+					params.polished->status == "final" && !selectionSent) {
+					selectionSent = true;
+					expectedChoice = "polished";
+					client->selectResult(sessionId, expectedChoice);
+				}
 			},
 			.completed = [&](const voxspell::protocol::SessionCompletedParams &params) {
-				completed = sawFinal && (!streaming || sawPartial) &&
-					params.sessionId == sessionId && !params.text.empty();
+				completed = params.sessionId == sessionId && sawProcessing &&
+					sawResults && params.selectedChoiceId == expectedChoice &&
+					!params.text.empty();
+				eventLoop.exit();
+			},
+			.sessionError = [&](const voxspell::protocol::SessionErrorParams &) {
+				failed = true;
 				eventLoop.exit();
 			},
 			.error = [&](const std::string &, const std::string &message) {
@@ -57,7 +80,7 @@ int main(int argc, char **argv) {
 
 	auto timeout = eventLoop.addTimeEvent(
 		CLOCK_MONOTONIC,
-		fcitx::now(CLOCK_MONOTONIC) + 5000000,
+		fcitx::now(CLOCK_MONOTONIC) + 7000000,
 		0,
 		[&](fcitx::EventSourceTime *, std::uint64_t) {
 			std::cerr << "daemon client smoke test timed out\n";
@@ -68,5 +91,8 @@ int main(int argc, char **argv) {
 	timeout->setOneShot();
 	client->start("smoke-input-context");
 	eventLoop.exec();
+	if (scenario == "batch" && !preview.empty()) {
+		failed = true;
+	}
 	return !failed && completed ? 0 : 1;
 }

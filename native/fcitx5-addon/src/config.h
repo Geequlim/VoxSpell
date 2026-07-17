@@ -20,6 +20,11 @@ FCITX_CONFIGURATION(
 		"HoldThresholdMs",
 		"开始说话模式所需长按时间（毫秒）",
 		200,
-		fcitx::IntConstrain(100, 2000)};);
+		fcitx::IntConstrain(100, 2000)};
+	fcitx::Option<bool> autoSelectResult{
+		this,
+		"AutoSelectResult",
+		"自动选择推荐结果",
+		true};);
 
 } // namespace voxspell

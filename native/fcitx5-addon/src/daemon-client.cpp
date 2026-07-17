@@ -99,34 +99,49 @@ void DaemonClient::cancel(const std::string &sessionId, std::string reason) {
 	}
 }
 
+void DaemonClient::selectResult(
+	const std::string &sessionId,
+	std::string choiceId) {
+	if (!ready_ || sessionId.empty()) {
+		return;
+	}
+
+	auto [message, inserted] = rpcClient_.request<"session.selectResult">(
+		nextRequestId(),
+		protocol::SessionSelectResultParams{sessionId, std::move(choiceId)},
+		[this, sessionId](const auto &result, const auto &) {
+			if (!result) {
+				reportError(sessionId, result.error());
+			}
+		});
+	if (inserted) {
+		queue(std::move(message));
+	}
+}
+
 void DaemonClient::configureNotifications() {
 	notificationServer_.on<"daemon.ready">(
 		[](const protocol::DaemonReadyParams &) {
 			return protocol::EmptyObject{};
 		});
-	notificationServer_.on<"session.recording">(
-		[](const protocol::SessionParams &) {
-			return protocol::EmptyObject{};
-		});
-	notificationServer_.on<"asr.ready">(
-		[](const protocol::AsrReadyParams &) {
-			return protocol::EmptyObject{};
-		});
-	notificationServer_.on<"transcript.partial">(
-		[this](const protocol::TranscriptPartialParams &params) {
-			if (callbacks_.partial) {
-				callbacks_.partial(params);
+	notificationServer_.on<"session.phase">(
+		[this](const protocol::SessionPhaseParams &params) {
+			if (callbacks_.phase) {
+				callbacks_.phase(params);
 			}
 			return protocol::EmptyObject{};
 		});
-	notificationServer_.on<"transcript.segmentFinal">(
-		[](const protocol::TranscriptSegmentFinalParams &) {
+	notificationServer_.on<"session.preview">(
+		[this](const protocol::SessionPreviewParams &params) {
+			if (callbacks_.preview) {
+				callbacks_.preview(params);
+			}
 			return protocol::EmptyObject{};
 		});
-	notificationServer_.on<"transcript.final">(
-		[this](const protocol::TranscriptFinalParams &params) {
-			if (callbacks_.finalTranscript) {
-				callbacks_.finalTranscript(params);
+	notificationServer_.on<"session.results">(
+		[this](const protocol::SessionResultsParams &params) {
+			if (callbacks_.results) {
+				callbacks_.results(params);
 			}
 			return protocol::EmptyObject{};
 		});
@@ -139,8 +154,8 @@ void DaemonClient::configureNotifications() {
 		});
 	notificationServer_.on<"session.error">(
 		[this](const protocol::SessionErrorParams &params) {
-			if (callbacks_.error) {
-				callbacks_.error(params.sessionId, params.error.message);
+			if (callbacks_.sessionError) {
+				callbacks_.sessionError(params);
 			}
 			return protocol::EmptyObject{};
 		});
@@ -374,6 +389,7 @@ void DaemonClient::handleMessage(const std::string &message) {
 		const glz::rpc::id_t id{*responseId};
 		rpcClient_.get_request_map<"session.finish">().erase(id);
 		rpcClient_.get_request_map<"session.cancel">().erase(id);
+		rpcClient_.get_request_map<"session.selectResult">().erase(id);
 		return;
 	}
 

@@ -4,27 +4,38 @@ import { createServer } from 'node:net';
 import { dirname, join } from 'node:path';
 
 const protocolVersion = 1;
-const defaultFirstPartialDelayMs = 1500;
-const defaultPartialIntervalMs = 350;
-const chunks = ['你好，', '这是来自', '测试 daemon ', '的实时识别', '结果', '。'];
+const previewSnapshots = [
+	'今天下午三点开会',
+	'今天下午三点我们开会',
+	'今天下午三点我们开会讨论方案',
+];
+const transcriptText = '今天下午三点我们开会讨论方案。';
+const polishedSnapshots = [
+	'今天下午三点，',
+	'今天下午三点，我们将召开会议，',
+	'今天下午三点，我们将召开会议讨论方案。',
+];
+
+function readOption(name, fallback) {
+	const prefix = `--${name}=`;
+	const argument = process.argv.find((value) => value.startsWith(prefix));
+	return argument?.slice(prefix.length) ?? fallback;
+}
 
 function readNumberOption(name, fallback) {
-	const argumentPrefix = `--${name}=`;
-	const argument = process.argv.find((value) => value.startsWith(argumentPrefix));
-	const rawValue = argument?.slice(argumentPrefix.length);
-	if (rawValue === undefined) return fallback;
-	const value = Number(rawValue);
+	const value = Number(readOption(name, fallback));
 	if (!Number.isInteger(value) || value < 0) {
 		throw new Error(`${name} must be a non-negative integer`);
 	}
 	return value;
 }
 
-const firstPartialDelayMs = readNumberOption(
-	'first-partial-delay-ms',
-	defaultFirstPartialDelayMs,
-);
-const partialIntervalMs = readNumberOption('partial-interval-ms', defaultPartialIntervalMs);
+const mode = readOption('mode', 'realtime');
+if (!['realtime', 'batch', 'polish'].includes(mode)) {
+	throw new Error('mode must be realtime, batch, or polish');
+}
+const firstDelayMs = readNumberOption('first-delay-ms', 1500);
+const intervalMs = readNumberOption('interval-ms', 350);
 const runtimeDirectory = process.env.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid()}`;
 const socketPath = process.env.VOXSPELL_SOCKET_PATH ?? join(runtimeDirectory, 'voxspell', 'daemon.sock');
 
@@ -74,36 +85,98 @@ function createConnection(socket) {
 		send({ jsonrpc: '2.0', method, params });
 	}
 
-	function clearSessionTimer() {
-		if (!session?.timer) return;
-		clearTimeout(session.timer);
-		session.timer = undefined;
+	function schedule(callback, delay) {
+		const timer = setTimeout(() => {
+			session?.timers.delete(timer);
+			callback();
+		}, delay);
+		session?.timers.add(timer);
 	}
 
-	function emitPartial() {
-		if (!session || session.finishing || session.chunkIndex >= chunks.length) return;
-		session.text += chunks[session.chunkIndex];
-		session.chunkIndex += 1;
-		notify('transcript.partial', {
+	function clearTimers() {
+		for (const timer of session?.timers ?? []) clearTimeout(timer);
+		session?.timers.clear();
+	}
+
+	function emitPreview(index = 0) {
+		if (!session || session.finishing || index >= previewSnapshots.length) return;
+		notify('session.preview', {
 			sessionId: session.id,
-			segmentId: 'mock-segment-1',
-			revision: session.chunkIndex,
-			text: session.text,
+			text: previewSnapshots[index],
 		});
-		if (session.chunkIndex < chunks.length) {
-			session.timer = setTimeout(emitPartial, partialIntervalMs);
+		schedule(() => emitPreview(index + 1), intervalMs);
+	}
+
+	function complete(choiceId, text) {
+		if (!session) return;
+		const sessionId = session.id;
+		clearTimers();
+		session = undefined;
+		notify('session.completed', {
+			sessionId,
+			selectedChoiceId: choiceId,
+			text,
+		});
+	}
+
+	function publishTranscriptAndComplete() {
+		if (!session) return;
+		notify('session.phase', { sessionId: session.id, phase: 'processing' });
+		notify('session.results', {
+			sessionId: session.id,
+			transcript: { text: transcriptText, status: 'final' },
+			recommendedChoiceId: 'transcript',
+		});
+		schedule(() => complete('transcript', transcriptText), 250);
+	}
+
+	function emitPolished(index = 0) {
+		if (!session || index >= polishedSnapshots.length) return;
+		const final = index === polishedSnapshots.length - 1;
+		notify('session.results', {
+			sessionId: session.id,
+			transcript: { text: transcriptText, status: 'final' },
+			polished: {
+				text: polishedSnapshots[index],
+				status: final ? 'final' : 'streaming',
+			},
+			...(final ? { recommendedChoiceId: 'polished' } : {}),
+		});
+		if (final) {
+			notify('session.phase', { sessionId: session.id, phase: 'choosing' });
+		} else {
+			schedule(() => emitPolished(index + 1), intervalMs);
 		}
 	}
 
-	function completeSession() {
+	function beginPolishing() {
 		if (!session) return;
-		const completedSession = session;
-		session = undefined;
-		const text = chunks.join('');
-		notify('transcript.final', { sessionId: completedSession.id, text });
-		setTimeout(() => {
-			notify('session.completed', { sessionId: completedSession.id, text });
-		}, 250);
+		notify('session.phase', { sessionId: session.id, phase: 'processing' });
+		notify('session.results', {
+			sessionId: session.id,
+			transcript: { text: transcriptText, status: 'final' },
+		});
+		notify('session.phase', { sessionId: session.id, phase: 'polishing' });
+		schedule(emitPolished, intervalMs);
+	}
+
+	function finishSession() {
+		if (!session || session.finishing) return;
+		session.finishing = true;
+		clearTimers();
+		if (mode === 'batch') {
+			notify('session.phase', { sessionId: session.id, phase: 'recognizing' });
+			schedule(publishTranscriptAndComplete, firstDelayMs);
+			return;
+		}
+		if (mode === 'polish') {
+			schedule(beginPolishing, Math.min(intervalMs, 250));
+			return;
+		}
+		schedule(
+			publishTranscriptAndComplete,
+			Math.max(0, session.firstPreviewAt - Date.now()),
+		);
 	}
 
 	function handleMessage(request) {
@@ -119,7 +192,10 @@ function createConnection(socket) {
 				}
 				initialized = true;
 				const serverInfo = { name: 'voxspell-mock-daemon', version: '0.1.0' };
-				const capabilities = { partialTranscript: true, polishPreview: false };
+				const capabilities = {
+					partialTranscript: mode !== 'batch',
+					polishPreview: mode === 'polish',
+				};
 				respond(request, { protocolVersion, serverInfo, capabilities });
 				notify('daemon.ready', { serverInfo, capabilities });
 				return;
@@ -136,36 +212,38 @@ function createConnection(socket) {
 				const id = randomUUID();
 				session = {
 					id,
-					text: '',
-					chunkIndex: 0,
 					finishing: false,
-					firstPartialAt: Date.now() + firstPartialDelayMs,
-					timer: setTimeout(emitPartial, firstPartialDelayMs),
+					firstPreviewAt: Date.now() + firstDelayMs,
+					timers: new Set(),
 				};
 				respond(request, { sessionId: id });
-				notify('session.recording', { sessionId: id });
-				return;
-			}
-			case 'session.finish': {
-				respond(request, null);
-				if (!session || request.params?.sessionId !== session.id || session.finishing) return;
-				session.finishing = true;
-				clearSessionTimer();
-				const delay =
-					session.chunkIndex === 0
-						? Math.max(0, session.firstPartialAt - Date.now())
-						: Math.min(250, partialIntervalMs);
-				session.timer = setTimeout(completeSession, delay);
-				return;
-			}
-			case 'session.cancel': {
-				respond(request, null);
-				if (session && request.params?.sessionId === session.id) {
-					clearSessionTimer();
-					session = undefined;
+				notify('session.phase', { sessionId: id, phase: 'recording' });
+				if (mode !== 'batch') {
+					notify('session.phase', { sessionId: id, phase: 'recognizing' });
+					schedule(emitPreview, firstDelayMs);
 				}
 				return;
 			}
+			case 'session.finish':
+				respond(request, null);
+				if (request.params?.sessionId === session?.id) finishSession();
+				return;
+			case 'session.selectResult': {
+				respond(request, null);
+				if (request.params?.sessionId !== session?.id) return;
+				const choiceId = request.params.choiceId;
+				const text = choiceId === 'polished' ? polishedSnapshots.at(-1) : transcriptText;
+				clearTimers();
+				schedule(() => complete(choiceId, text), 100);
+				return;
+			}
+			case 'session.cancel':
+				respond(request, null);
+				if (request.params?.sessionId === session?.id) {
+					clearTimers();
+					session = undefined;
+				}
+				return;
 			default:
 				send({
 					jsonrpc: '2.0',
@@ -176,7 +254,7 @@ function createConnection(socket) {
 	}
 
 	socket.on('data', createParser(handleMessage));
-	socket.on('close', clearSessionTimer);
+	socket.on('close', clearTimers);
 	socket.on('error', () => {});
 }
 
@@ -189,9 +267,7 @@ server.on('error', (error) => {
 });
 server.listen(socketPath, () => {
 	console.log(`[voxspell-mock] listening on ${socketPath}`);
-	console.log(
-		`[voxspell-mock] first partial delay=${firstPartialDelayMs}ms, interval=${partialIntervalMs}ms`,
-	);
+	console.log(`[voxspell-mock] mode=${mode}, first delay=${firstDelayMs}ms`);
 });
 
 async function shutdown() {
