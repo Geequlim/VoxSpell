@@ -1,0 +1,24 @@
+{
+	"name": "@voxspell/asr-openai-compatible",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"sideEffects": false,
+	"exports": {
+		"./openai-compatible-asr-provider": "./src/openai-compatible-asr-provider.ts",
+		"./pcm-wave": "./src/pcm-wave.ts"
+	},
+	"dependencies": {
+		"@sinclair/typebox": "0.34.52",
+		"@voxspell/asr-core": "workspace:^",
+		"openai": "6.47.0"
+	},
+	"devDependencies": {
+		"@types/node": "24.13.3",
+		"typescript": "7.0.2",
+		"vitest": "4.1.10"
+	},
+	"engines": {
+		"node": ">=24"
+	}
+}

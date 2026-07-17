@@ -1,0 +1,24 @@
+{
+	"name": "@voxspell/config",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"sideEffects": false,
+	"exports": {
+		"./asr-provider": "./src/asr-provider.ts",
+		"./config-schema": "./src/config-schema.ts",
+		"./load-config": "./src/load-config.ts"
+	},
+	"dependencies": {
+		"@sinclair/typebox": "0.34.52",
+		"yaml": "2.8.1"
+	},
+	"devDependencies": {
+		"@types/node": "24.13.3",
+		"typescript": "7.0.2",
+		"vitest": "4.1.10"
+	},
+	"engines": {
+		"node": ">=24"
+	}
+}

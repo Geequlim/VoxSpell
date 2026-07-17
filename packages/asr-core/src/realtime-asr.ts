@@ -32,7 +32,7 @@ export interface RealtimeAsrProvider {
 	readonly id: string;
 	readonly capabilities: AsrCapabilities;
 
-	/** 创建一次独立的实时识别会话。 */
+	/** 创建一次独立的识别会话。 */
 	createSession(options: AsrSessionOptions): Promise<RealtimeAsrSession>;
 }
 

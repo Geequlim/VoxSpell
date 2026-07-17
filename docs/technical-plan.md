@@ -1,8 +1,8 @@
 # VoxSpell 技术规划
 
-> 状态：方案草案
+> 状态：实施中
 >
-> 更新时间：2026-07-17
+> 更新时间：2026-07-18
 >
 > 目标平台：Linux + Fcitx 5
 >
@@ -15,6 +15,7 @@ VoxSpell 是面向 Linux 桌面的现代 AI 语音输入工具。项目在保留
 首期目标：
 
 - 支持按住说话、松开完成的 PTT 交互。
+- 先通过 OpenAI-compatible 音频转写接口跑通录音、整段上传、识别和提交闭环，首批支持 OpenRouter 与智谱 GLM。
 - 使用腾讯云实时语音识别 WebSocket API，边说边显示识别结果。
 - 普通键盘输入继续使用系统安装的 `fcitx5-rime`，不自行实现或代理 Rime 按键链路。
 - 支持用户语音词典、热词映射、数字归一化和确定性文本处理。
@@ -118,18 +119,17 @@ Rust worker 使用 `pipewire-rs`，继续保持独立进程，并沿用 stdout P
 ```text
 用户按下 PTT
   -> Fcitx C++ module 发送 session.start
-  -> Node daemon 并行执行：
-       1. 启动 pw-record
-       2. 创建腾讯云 WebSocket 会话
+  -> Node daemon 启动 pw-record 和选定的 ASR Provider
   -> pw-record stdout 持续输出 PCM
-  -> daemon 短暂缓冲首批音频，ASR ready 后按实时速率发送
-  -> Provider 返回 partial / segment-final
-  -> daemon 转成统一事件并推送给 Fcitx preedit
+  -> 实时 Provider 按实时速率消费 PCM，并返回 partial / segment-final
+  -> 批量 Provider 在内存中有界缓存本次短语音，不产生虚假的 partial
+  -> daemon 将 Provider 事件转成统一事件并推送给 Fcitx
 
 用户松开 PTT
   -> Fcitx module 发送 session.finish
-  -> daemon 停止 pw-record、排空 PCM 并发送 ASR end
-  -> 等待供应商最终结果
+  -> daemon 停止 pw-record 并排空 PCM
+  -> 实时 Provider 发送 ASR end 并等待供应商 final
+  -> 批量 Provider 将 PCM 封装为 WAV 后上传并等待转写结果
   -> 用户词典和数字后处理
   -> 可选 AI 润色
   -> 输出校验
@@ -229,7 +229,14 @@ idle
 - `cancel()` 必须中断录音子进程、ASR WebSocket 和 AI 请求。
 - 过期 Provider 事件通过 `sessionId` 丢弃，不能覆盖新会话 UI。
 
-## 6. 实时 ASR Provider 设计
+## 6. ASR Provider 设计
+
+Daemon 使用同一套增量音频会话接口容纳两类 Provider：
+
+- 实时 Provider 边接收 PCM 边发送到供应商，可以产生 partial 和 segment-final。
+- 批量 Provider 接收录音期间的 PCM，但只在 `finish()` 后上传完整 WAV，只产生 completed。
+
+`partialResults` capability 明确表示 Provider 是否产生实时中间结果。业务层不得根据 Provider ID 推断工作模式。
 
 ```ts
 export interface RealtimeAsrProvider {
@@ -267,6 +274,20 @@ Provider 内部负责：
 - 供应商限制与 capability 声明。
 
 业务层不得依赖腾讯云的 `slice_type`、千问事件名或豆包二进制协议字段。
+
+### 6.1 OpenAI-compatible 批量转写
+
+首个真实 ASR 实现使用官方 OpenAI Node SDK 作为兼容协议客户端，不自行实现 multipart 请求：
+
+- Provider 配置使用 `baseUrl`，SDK 负责追加 `/audio/transcriptions`。
+- 首批配置 OpenRouter 与智谱 GLM，通过 `OPENROUTER_API_KEY` 和 `GLM_API_KEY` 环境变量读取密钥。
+- `pw-record` 的 16 kHz、单声道、16-bit PCM 在内存中封装为 WAV，再使用 SDK 的 `toFile()` 上传。
+- 首版按短时 PTT 语音设计，音频不落盘；会话必须有明确的时长或字节上限，不能无限增长。
+- SDK 自动重试关闭，避免响应丢失时重复上传和重复计费；错误只映射为稳定的脱敏 Provider 错误。
+- SDK 日志关闭，不允许请求体、响应体、Authorization 或用户语音内容进入默认日志。
+- `cancel()` 使用 `AbortSignal` 中止正在进行的请求并释放缓存。
+
+批量 Provider 的 `capabilities.partialResults` 为 `false`。录音期间 UI 只展示录音状态，不能伪造实时识别文本。
 
 ## 7. 腾讯云首期实现
 
@@ -377,7 +398,7 @@ export interface TextPolisher {
 
 首期实现 OpenAI-compatible Chat Completions SSE：
 
-- 使用 Node 原生 `fetch` 和独立 SSE parser。
+- 优先使用支持自定义 `baseURL`、取消和流式事件的成熟 SDK，不自行实现 HTTP 请求与 SSE parser。
 - 默认关闭 thinking/reasoning 输出。
 - 支持自定义 endpoint、model、headers、prompt 和超时。
 - `AbortController` 贯穿网络与业务层。
@@ -403,6 +424,7 @@ VoxSpell/
 ├── packages/
 │   ├── protocol/                  # JSON-RPC 方法、TypeBox schema、版本和 capability
 │   ├── asr-core/                  # Provider 接口、事件和 transcript assembler
+│   ├── asr-openai-compatible/     # OpenRouter、GLM 等批量音频转写
 │   ├── asr-tencent/               # 腾讯云实现
 │   ├── audio-capture/              # pw-record 进程适配和统一采集接口
 │   ├── text-pipeline/              # 词典、数字处理和输出校验
@@ -482,6 +504,8 @@ $XDG_RUNTIME_DIR/voxspell/daemon.sock
 - 数字归一化 golden tests。
 - 文本流水线幂等与保护词测试。
 - Provider contract tests。
+- 使用本地 fake HTTP server 验证 OpenAI SDK 生成的转写路径、multipart、鉴权、取消和错误映射。
+- 使用固定 WAV fixture 验证批量 Provider 的 PCM 聚合、WAV 封装和 completed 事件，默认测试不得访问公网。
 - 腾讯云签名固定向量测试。
 - 使用 fake child process 验证 `pw-record` 启动、任意 chunk 边界、停止、stderr 和异常退出。
 - 使用本地 fake WebSocket server 验证节奏、backpressure、end/final、超时和错误。
@@ -535,7 +559,25 @@ $XDG_RUNTIME_DIR/voxspell/daemon.sock
 
 完成标准：无云账号时可通过 fake provider 完成端到端输入。
 
-### 阶段 2：腾讯云实时 ASR
+### 阶段 2：OpenAI-compatible 批量转写
+
+- 使用 TypeBox 实现配置 schema、YAML 加载、active Provider 选择和环境变量密钥解析。
+- 使用 OpenAI Node SDK 实现 OpenRouter、智谱 GLM 共用的批量音频转写 Provider。
+- 将裸 PCM 封装为 WAV，完成取消、超时、错误分类和隐私约束。
+- 提供两类显式真实冒烟测试：麦克风录制后请求，以及从 fixtures 选取一组音频逐条请求并汇总。
+- 默认测试使用本地 fake HTTP server，不访问公网、不读取真实密钥、不产生云费用。
+
+完成标准：OpenRouter 或 GLM 至少一个真实服务可以完成整段语音转写；两类冒烟测试均只能显式执行，且不会泄露密钥和请求正文。
+
+### 阶段 3：Fcitx 批量语音输入闭环
+
+- 将批量 Provider 注入 daemon 运行时。
+- 跑通 PTT 按下录音、松开上传、识别完成后单次提交。
+- 在没有 partial 的情况下提供明确的录音中和识别中状态。
+
+完成标准：无需腾讯云账号即可使用 OpenRouter 或 GLM 完成一次真实 Fcitx 语音输入。
+
+### 阶段 4：腾讯云实时 ASR
 
 - 实现签名、WebSocket、音频节奏和结果拼装。
 - 实现取消、超时、错误分类和指标。
@@ -543,7 +585,7 @@ $XDG_RUNTIME_DIR/voxspell/daemon.sock
 
 完成标准：partial 实时显示，松开后只提交一次 final，断网和鉴权失败不影响普通 Rime 输入。
 
-### 阶段 3：确定性文本处理
+### 阶段 5：确定性文本处理
 
 - 移植并修正用户词典。
 - 移植数字、日期、时间、百分比和编号规则。
@@ -551,7 +593,7 @@ $XDG_RUNTIME_DIR/voxspell/daemon.sock
 
 完成标准：所有冻结 golden cases 在 TypeScript 中通过，重复执行保持预期幂等。
 
-### 阶段 4：AI 润色
+### 阶段 6：AI 润色
 
 - 实现 TextPolisher 和 OpenAI-compatible provider。
 - 实现流式预览、取消、输出校验和原文回退。
@@ -559,7 +601,7 @@ $XDG_RUNTIME_DIR/voxspell/daemon.sock
 
 完成标准：AI 成功时提交校验后的文本，任意失败时原文仍可一键提交。
 
-### 阶段 5：发布与多 Provider
+### 阶段 7：发布与多 Provider
 
 - 完成 systemd user service 和 Arch/Debian 打包。
 - 加入配置迁移、日志诊断和安装检查工具。
@@ -572,6 +614,7 @@ $XDG_RUNTIME_DIR/voxspell/daemon.sock
 首个可发布版本必须同时满足：
 
 - 普通 Rime 输入不经过 VoxSpell daemon。
+- OpenAI-compatible 批量 Provider 可以完成录音、上传和单次 final 提交。
 - 腾讯云实时 partial 可见，final 只提交一次。
 - PTT、Escape、失焦和 daemon 断线均有确定行为。
 - 用户词典、数字处理和 AI 回退具有自动化测试。

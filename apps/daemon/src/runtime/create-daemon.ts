@@ -17,8 +17,8 @@ import {
 import { UnixSocketServer } from '../transport/unix-socket-server.js';
 
 import type { Socket } from 'node:net';
+import type { RealtimeAsrProvider } from '@voxspell/asr-core/realtime-asr';
 import type { AudioCaptureBackend } from '../audio-capture.js';
-import type { RealtimeAsrProvider } from '../realtime-asr.js';
 import type { UnixSocketClient } from '../transport/unix-socket-server.js';
 
 export interface DaemonRuntimeOptions {
@@ -101,7 +101,10 @@ export class DaemonRuntime {
 		const rpcConnection = new DaemonRpcConnection({
 			connection,
 			serverInfo: { name: 'voxspell-daemon', version: '0.0.0' },
-			capabilities: { partialTranscript: true, polishPreview: false },
+			capabilities: {
+				partialTranscript: asrProvider.capabilities.partialResults,
+				polishPreview: false,
+			},
 			reloadConfig: async () => undefined,
 			createSessionCoordinator: (publish) =>
 				new SessionCoordinator({

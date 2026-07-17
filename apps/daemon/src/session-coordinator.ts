@@ -2,6 +2,11 @@ import { randomUUID } from 'node:crypto';
 
 import { transitionSessionState } from './session-state.js';
 
+import type {
+	AsrEvent,
+	RealtimeAsrProvider,
+	RealtimeAsrSession,
+} from '@voxspell/asr-core/realtime-asr';
 import type { SessionId } from '@voxspell/protocol/common';
 import type { ProtocolErrorCode, ProtocolErrorData } from '@voxspell/protocol/errors';
 import type {
@@ -17,7 +22,6 @@ import type {
 	TranscriptSegmentFinalParams,
 } from '@voxspell/protocol/transcript';
 import type { AudioCaptureBackend, AudioCaptureSession } from './audio-capture.js';
-import type { AsrEvent, RealtimeAsrProvider, RealtimeAsrSession } from './realtime-asr.js';
 import type { SessionState } from './session-state.js';
 
 export type DaemonSessionEvent =

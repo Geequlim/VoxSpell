@@ -16,6 +16,8 @@ develop:
       description: 执行单元测试
       command:
         - yarn --cwd packages/protocol vitest run
+        - yarn --cwd packages/config vitest run
+        - yarn --cwd packages/asr-openai-compatible vitest run
         - yarn --cwd apps/daemon vitest run
       actions:
         - name: fcitx5-addon
@@ -26,6 +28,17 @@ develop:
     - name: smoke
       description: 使用真实 Unix Socket 验证 daemon 闭环
       command: yarn --cwd apps/daemon vitest run test/daemon-runtime.test.ts
+      actions:
+        - name: asr-fixtures
+          description: 使用固定 fixtures 请求真实 ASR Provider
+          command:
+            - yarn --cwd apps/daemon rspack build
+            - VOXSPELL_CONFIG_PATH=../../configs/config.yaml yarn --cwd apps/daemon node --enable-source-maps dist/asr-fixtures-smoke.cjs
+        - name: asr-microphone
+          description: 录制麦克风后请求真实 ASR Provider
+          command:
+            - yarn --cwd apps/daemon rspack build
+            - VOXSPELL_CONFIG_PATH=../../configs/config.yaml yarn --cwd apps/daemon node --enable-source-maps dist/asr-microphone-smoke.cjs
     - name: audio-smoke
       description: 录制麦克风并显示实时音量
       command:
@@ -35,6 +48,9 @@ develop:
       description: 执行 TypeScript 类型检查
       command:
         - yarn --cwd packages/protocol tsc --noEmit
+        - yarn --cwd packages/asr-core tsc --noEmit
+        - yarn --cwd packages/config tsc --noEmit
+        - yarn --cwd packages/asr-openai-compatible tsc --noEmit
         - yarn --cwd apps/daemon tsc --noEmit
     - name: lint
       description: 使用 Oxlint 执行静态代码分析

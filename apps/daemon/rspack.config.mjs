@@ -72,6 +72,8 @@ export default function createRspackConfig(environment = {}) {
 		entry: {
 			index: './src/index.ts',
 			'audio-smoke': './src/tools/audio-smoke.ts',
+			'asr-fixtures-smoke': './src/tools/asr-fixtures-smoke.ts',
+			'asr-microphone-smoke': './src/tools/asr-microphone-smoke.ts',
 		},
 		target: 'node',
 		mode: debug ? 'development' : 'production',

@@ -2001,6 +2001,41 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@voxspell/asr-core@workspace:^, @voxspell/asr-core@workspace:packages/asr-core":
+  version: 0.0.0-use.local
+  resolution: "@voxspell/asr-core@workspace:packages/asr-core"
+  dependencies:
+    "@types/node": "npm:24.13.3"
+    "@voxspell/protocol": "workspace:^"
+    typescript: "npm:7.0.2"
+  languageName: unknown
+  linkType: soft
+
+"@voxspell/asr-openai-compatible@workspace:^, @voxspell/asr-openai-compatible@workspace:packages/asr-openai-compatible":
+  version: 0.0.0-use.local
+  resolution: "@voxspell/asr-openai-compatible@workspace:packages/asr-openai-compatible"
+  dependencies:
+    "@sinclair/typebox": "npm:0.34.52"
+    "@types/node": "npm:24.13.3"
+    "@voxspell/asr-core": "workspace:^"
+    openai: "npm:6.47.0"
+    typescript: "npm:7.0.2"
+    vitest: "npm:4.1.10"
+  languageName: unknown
+  linkType: soft
+
+"@voxspell/config@workspace:^, @voxspell/config@workspace:packages/config":
+  version: 0.0.0-use.local
+  resolution: "@voxspell/config@workspace:packages/config"
+  dependencies:
+    "@sinclair/typebox": "npm:0.34.52"
+    "@types/node": "npm:24.13.3"
+    typescript: "npm:7.0.2"
+    vitest: "npm:4.1.10"
+    yaml: "npm:2.8.1"
+  languageName: unknown
+  linkType: soft
+
 "@voxspell/daemon@workspace:apps/daemon":
   version: 0.0.0-use.local
   resolution: "@voxspell/daemon@workspace:apps/daemon"
@@ -2008,6 +2043,9 @@ __metadata:
     "@rspack/cli": "npm:2.1.4"
     "@rspack/core": "npm:2.1.4"
     "@types/node": "npm:24.13.3"
+    "@voxspell/asr-core": "workspace:^"
+    "@voxspell/asr-openai-compatible": "workspace:^"
+    "@voxspell/config": "workspace:^"
     "@voxspell/protocol": "workspace:^"
     nodemon-webpack-plugin: "npm:4.8.2"
     ts-checker-rspack-plugin: "npm:1.5.2"
@@ -5382,6 +5420,30 @@ __metadata:
   languageName: node
   linkType: hard
 
+"openai@npm:6.47.0":
+  version: 6.47.0
+  resolution: "openai@npm:6.47.0"
+  peerDependencies:
+    "@aws-sdk/credential-provider-node": ">=3.972.0 <4"
+    "@smithy/hash-node": ">=4.3.0 <5"
+    "@smithy/signature-v4": ">=5.4.0 <6"
+    ws: ^8.18.0
+    zod: ^3.25 || ^4.0
+  peerDependenciesMeta:
+    "@aws-sdk/credential-provider-node":
+      optional: true
+    "@smithy/hash-node":
+      optional: true
+    "@smithy/signature-v4":
+      optional: true
+    ws:
+      optional: true
+    zod:
+      optional: true
+  checksum: 10c0/643fe51bbbd3c540dc72aa0366007a723c4a51b413cb8192f066a108429c7c0eab2d33a66c63b666da1db1fc0c8f34be76c87268db31408828d5b484928f3c23
+  languageName: node
+  linkType: hard
+
 "openapi-types@npm:^12.1.3":
   version: 12.1.3
   resolution: "openapi-types@npm:12.1.3"
@@ -7716,6 +7778,15 @@ __metadata:
   version: 5.0.0
   resolution: "yallist@npm:5.0.0"
   checksum: 10c0/a499c81ce6d4a1d260d4ea0f6d49ab4da09681e32c3f0472dee16667ed69d01dae63a3b81745a24bd78476ec4fcf856114cb4896ace738e01da34b2c42235416
+  languageName: node
+  linkType: hard
+
+"yaml@npm:2.8.1":
+  version: 2.8.1
+  resolution: "yaml@npm:2.8.1"
+  bin:
+    yaml: bin.mjs
+  checksum: 10c0/7c587be00d9303d2ae1566e03bc5bc7fe978ba0d9bf39cc418c3139d37929dfcb93a230d9749f2cb578b6aa5d9ebebc322415e4b653cb83acd8bc0bc321707f3
   languageName: node
   linkType: hard
 

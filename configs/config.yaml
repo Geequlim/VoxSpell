@@ -1,0 +1,16 @@
+version: 1
+
+asr:
+  activeProvider: openrouter
+  providers:
+    - id: openrouter
+      type: openai-compatible-transcription
+      baseUrl: https://openrouter.ai/api/v1
+      apiKeyEnvironment: OPENROUTER_API_KEY
+      model: qwen/qwen3-asr-flash-2026-02-10
+
+    - id: glm
+      type: openai-compatible-transcription
+      baseUrl: https://open.bigmodel.cn/api/paas/v4
+      apiKeyEnvironment: GLM_API_KEY
+      model: glm-asr-2512

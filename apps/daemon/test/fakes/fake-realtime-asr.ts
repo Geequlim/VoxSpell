@@ -1,11 +1,11 @@
 import { AsyncQueue } from './async-queue.js';
 
 import type {
+	AsrEvent,
 	AsrSessionOptions,
 	RealtimeAsrProvider,
 	RealtimeAsrSession,
-} from '../../src/realtime-asr.js';
-import type { AsrEvent } from '../../src/realtime-asr.js';
+} from '@voxspell/asr-core/realtime-asr';
 
 export class FakeRealtimeAsrProvider implements RealtimeAsrProvider {
 	readonly id = 'fake-asr';

@@ -5,3 +5,4 @@ Version=@PROJECT_VERSION@
 Library=voxspell
 Type=SharedLibrary
 OnDemand=False
+Configurable=True

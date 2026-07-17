@@ -3,7 +3,7 @@ import type {
 	AsrSessionOptions,
 	RealtimeAsrProvider,
 	RealtimeAsrSession,
-} from '../realtime-asr.js';
+} from '@voxspell/asr-core/realtime-asr';
 
 interface Deferred {
 	readonly promise: Promise<void>;
