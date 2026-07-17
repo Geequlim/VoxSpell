@@ -1,0 +1,342 @@
+[
+	{
+		"id": "00138",
+		"file": "ascend_test_00138.wav",
+		"split": "test",
+		"duration": 3.049999952316284,
+		"language": "mixed",
+		"speakerId": 17,
+		"sessionId": 1,
+		"topic": "persona",
+		"quality": {
+			"rmsDbfs": -25.6,
+			"peakDbfs": -9,
+			"clippingPercent": 0,
+			"silencePercent": 8.6
+		},
+		"originalPath": "/storage/hf-datasets-cache/all/datasets/16739474757983-config-parquet-and-info-CAiRE-ASCEND-5c1abf9c/downloads/extracted/f0790e45797bd654a35ecd1eb4865fa761f1cbd842b674e0defb6812ae8cffbf/waves/ses1_spk17_L4334_634.2500_3.0500.wav"
+	},
+	{
+		"id": "00938",
+		"file": "ascend_test_00938.wav",
+		"split": "test",
+		"duration": 3.8499999046325684,
+		"language": "mixed",
+		"speakerId": 17,
+		"sessionId": 3,
+		"topic": "education",
+		"quality": {
+			"rmsDbfs": -22.1,
+			"peakDbfs": -5.5,
+			"clippingPercent": 0,
+			"silencePercent": 11.5
+		},
+		"originalPath": "/storage/hf-datasets-cache/all/datasets/16739474757983-config-parquet-and-info-CAiRE-ASCEND-5c1abf9c/downloads/extracted/f0790e45797bd654a35ecd1eb4865fa761f1cbd842b674e0defb6812ae8cffbf/waves/ses3_spk17_L17143_1076.6500_3.8500.wav"
+	},
+	{
+		"id": "01278",
+		"file": "ascend_test_01278.wav",
+		"split": "test",
+		"duration": 5.019999980926514,
+		"language": "mixed",
+		"speakerId": 17,
+		"sessionId": 4,
+		"topic": "technology",
+		"quality": {
+			"rmsDbfs": -27.3,
+			"peakDbfs": -5.5,
+			"clippingPercent": 0,
+			"silencePercent": 15.1
+		},
+		"originalPath": "/storage/hf-datasets-cache/all/datasets/16739474757983-config-parquet-and-info-CAiRE-ASCEND-5c1abf9c/downloads/extracted/f0790e45797bd654a35ecd1eb4865fa761f1cbd842b674e0defb6812ae8cffbf/waves/ses4_spk17_L23111_796.6400_5.0200.wav"
+	},
+	{
+		"id": "00193",
+		"file": "ascend_test_00193.wav",
+		"split": "test",
+		"duration": 3.7699999809265137,
+		"language": "mixed",
+		"speakerId": 17,
+		"sessionId": 1,
+		"topic": "persona",
+		"quality": {
+			"rmsDbfs": -26.5,
+			"peakDbfs": -3.9,
+			"clippingPercent": 0,
+			"silencePercent": 22.9
+		},
+		"originalPath": "/storage/hf-datasets-cache/all/datasets/16739474757983-config-parquet-and-info-CAiRE-ASCEND-5c1abf9c/downloads/extracted/f0790e45797bd654a35ecd1eb4865fa761f1cbd842b674e0defb6812ae8cffbf/waves/ses1_spk17_L4558_855.8350_3.7700.wav"
+	},
+	{
+		"id": "00208",
+		"file": "ascend_test_00208.wav",
+		"split": "test",
+		"duration": 7.920000076293945,
+		"language": "mixed",
+		"speakerId": 3,
+		"sessionId": 1,
+		"topic": "persona",
+		"quality": {
+			"rmsDbfs": -17.6,
+			"peakDbfs": 0,
+			"clippingPercent": 0.002,
+			"silencePercent": 8.6
+		},
+		"originalPath": "/storage/hf-datasets-cache/all/datasets/16739474757983-config-parquet-and-info-CAiRE-ASCEND-5c1abf9c/downloads/extracted/f0790e45797bd654a35ecd1eb4865fa761f1cbd842b674e0defb6812ae8cffbf/waves/ses1_spk3_L6489_4.600_7.920.wav"
+	},
+	{
+		"id": "00712",
+		"file": "ascend_test_00712.wav",
+		"split": "test",
+		"duration": 6,
+		"language": "mixed",
+		"speakerId": 3,
+		"sessionId": 2,
+		"topic": "sports",
+		"quality": {
+			"rmsDbfs": -16,
+			"peakDbfs": 0,
+			"clippingPercent": 0.056,
+			"silencePercent": 12.7
+		},
+		"originalPath": "/storage/hf-datasets-cache/all/datasets/16739474757983-config-parquet-and-info-CAiRE-ASCEND-5c1abf9c/downloads/extracted/f0790e45797bd654a35ecd1eb4865fa761f1cbd842b674e0defb6812ae8cffbf/waves/ses2_spk3_L13481_866.580_6.000.wav"
+	},
+	{
+		"id": "00226",
+		"file": "ascend_test_00226.wav",
+		"split": "test",
+		"duration": 2.2799999713897705,
+		"language": "mixed",
+		"speakerId": 3,
+		"sessionId": 1,
+		"topic": "persona",
+		"quality": {
+			"rmsDbfs": -22.9,
+			"peakDbfs": -6.6,
+			"clippingPercent": 0,
+			"silencePercent": 17.5
+		},
+		"originalPath": "/storage/hf-datasets-cache/all/datasets/16739474757983-config-parquet-and-info-CAiRE-ASCEND-5c1abf9c/downloads/extracted/f0790e45797bd654a35ecd1eb4865fa761f1cbd842b674e0defb6812ae8cffbf/waves/ses1_spk3_L6525_61.920_2.280.wav"
+	},
+	{
+		"id": "00015",
+		"file": "ascend_train_00015.wav",
+		"split": "train",
+		"duration": 4.739999771118164,
+		"language": "mixed",
+		"speakerId": 1,
+		"sessionId": 1,
+		"topic": "persona",
+		"quality": {
+			"rmsDbfs": -21.9,
+			"peakDbfs": -1.4,
+			"clippingPercent": 0,
+			"silencePercent": 24.1
+		},
+		"originalPath": "/storage/hf-datasets-cache/all/datasets/16739474757983-config-parquet-and-info-CAiRE-ASCEND-5c1abf9c/downloads/extracted/f0790e45797bd654a35ecd1eb4865fa761f1cbd842b674e0defb6812ae8cffbf/waves/ses1_spk1_L34_63.460_4.740.wav"
+	},
+	{
+		"id": "00110",
+		"file": "ascend_train_00110.wav",
+		"split": "train",
+		"duration": 7.980000019073486,
+		"language": "mixed",
+		"speakerId": 2,
+		"sessionId": 1,
+		"topic": "persona",
+		"quality": {
+			"rmsDbfs": -17.4,
+			"peakDbfs": 0,
+			"clippingPercent": 0.091,
+			"silencePercent": 15.3
+		},
+		"originalPath": "/storage/hf-datasets-cache/all/datasets/16739474757983-config-parquet-and-info-CAiRE-ASCEND-5c1abf9c/downloads/extracted/f0790e45797bd654a35ecd1eb4865fa761f1cbd842b674e0defb6812ae8cffbf/waves/ses1_spk2_L224_392.7290_7.9800.wav"
+	},
+	{
+		"id": "00403",
+		"file": "ascend_validation_00403.wav",
+		"split": "validation",
+		"duration": 4.800000190734863,
+		"language": "mixed",
+		"speakerId": 7,
+		"sessionId": 1,
+		"topic": "persona",
+		"quality": {
+			"rmsDbfs": -21.7,
+			"peakDbfs": -6.6,
+			"clippingPercent": 0,
+			"silencePercent": 9.6
+		},
+		"originalPath": "/storage/hf-datasets-cache/all/datasets/16739474757983-config-parquet-and-info-CAiRE-ASCEND-5c1abf9c/downloads/extracted/f0790e45797bd654a35ecd1eb4865fa761f1cbd842b674e0defb6812ae8cffbf/waves/ses1_spk7_L7622_570.8650_4.8000.wav"
+	},
+	{
+		"id": "03520",
+		"file": "ascend_train_03520.wav",
+		"split": "train",
+		"duration": 4.099999904632568,
+		"language": "mixed",
+		"speakerId": 11,
+		"sessionId": 2,
+		"topic": "education",
+		"quality": {
+			"rmsDbfs": -17.8,
+			"peakDbfs": 0,
+			"clippingPercent": 0.029,
+			"silencePercent": 5.4
+		},
+		"originalPath": "/storage/hf-datasets-cache/all/datasets/16739474757983-config-parquet-and-info-CAiRE-ASCEND-5c1abf9c/downloads/extracted/f0790e45797bd654a35ecd1eb4865fa761f1cbd842b674e0defb6812ae8cffbf/waves/ses2_spk11_L9004_94.200_4.100.wav"
+	},
+	{
+		"id": "02378",
+		"file": "ascend_train_02378.wav",
+		"split": "train",
+		"duration": 4.599999904632568,
+		"language": "mixed",
+		"speakerId": 24,
+		"sessionId": 1,
+		"topic": "persona",
+		"quality": {
+			"rmsDbfs": -23.8,
+			"peakDbfs": -8.6,
+			"clippingPercent": 0,
+			"silencePercent": 9.6
+		},
+		"originalPath": "/storage/hf-datasets-cache/all/datasets/16739474757983-config-parquet-and-info-CAiRE-ASCEND-5c1abf9c/downloads/extracted/f0790e45797bd654a35ecd1eb4865fa761f1cbd842b674e0defb6812ae8cffbf/waves/ses1_spk24_L6004_1018.140_4.600.wav"
+	},
+	{
+		"id": "09555",
+		"file": "ascend_train_09555.wav",
+		"split": "train",
+		"duration": 5.769999980926514,
+		"language": "mixed",
+		"speakerId": 9,
+		"sessionId": 4,
+		"topic": "philosophy",
+		"quality": {
+			"rmsDbfs": -14.2,
+			"peakDbfs": 0,
+			"clippingPercent": 0.121,
+			"silencePercent": 10.1
+		},
+		"originalPath": "/storage/hf-datasets-cache/all/datasets/16739474757983-config-parquet-and-info-CAiRE-ASCEND-5c1abf9c/downloads/extracted/f0790e45797bd654a35ecd1eb4865fa761f1cbd842b674e0defb6812ae8cffbf/waves/ses4_spk25_L24445_306.9700_5.7700.wav"
+	},
+	{
+		"id": "09545",
+		"file": "ascend_train_09545.wav",
+		"split": "train",
+		"duration": 4.71999979019165,
+		"language": "mixed",
+		"speakerId": 26,
+		"sessionId": 4,
+		"topic": "philosophy",
+		"quality": {
+			"rmsDbfs": -14.7,
+			"peakDbfs": 0,
+			"clippingPercent": 0.032,
+			"silencePercent": 9.7
+		},
+		"originalPath": "/storage/hf-datasets-cache/all/datasets/16739474757983-config-parquet-and-info-CAiRE-ASCEND-5c1abf9c/downloads/extracted/f0790e45797bd654a35ecd1eb4865fa761f1cbd842b674e0defb6812ae8cffbf/waves/ses4_spk26_L24423_265.990_4.720.wav"
+	},
+	{
+		"id": "00806",
+		"file": "ascend_train_00806.wav",
+		"split": "train",
+		"duration": 3.9200000762939453,
+		"language": "mixed",
+		"speakerId": 19,
+		"sessionId": 4,
+		"topic": "technology",
+		"quality": {
+			"rmsDbfs": -21,
+			"peakDbfs": -0.3,
+			"clippingPercent": 0,
+			"silencePercent": 23.5
+		},
+		"originalPath": "/storage/hf-datasets-cache/all/datasets/16739474757983-config-parquet-and-info-CAiRE-ASCEND-5c1abf9c/downloads/extracted/f0790e45797bd654a35ecd1eb4865fa761f1cbd842b674e0defb6812ae8cffbf/waves/ses4_spk19_L1718_252.960_3.920.wav"
+	},
+	{
+		"id": "08743",
+		"file": "ascend_train_08743.wav",
+		"split": "train",
+		"duration": 6.659999847412109,
+		"language": "mixed",
+		"speakerId": 15,
+		"sessionId": 4,
+		"topic": "sports",
+		"quality": {
+			"rmsDbfs": -14.8,
+			"peakDbfs": 0,
+			"clippingPercent": 0.122,
+			"silencePercent": 16.2
+		},
+		"originalPath": "/storage/hf-datasets-cache/all/datasets/16739474757983-config-parquet-and-info-CAiRE-ASCEND-5c1abf9c/downloads/extracted/f0790e45797bd654a35ecd1eb4865fa761f1cbd842b674e0defb6812ae8cffbf/waves/ses4_spk15_L22306_694.980_6.660.wav"
+	},
+	{
+		"id": "07894",
+		"file": "ascend_train_07894.wav",
+		"split": "train",
+		"duration": 5.639999866485596,
+		"language": "mixed",
+		"speakerId": 10,
+		"sessionId": 4,
+		"topic": "philosophy",
+		"quality": {
+			"rmsDbfs": -19.6,
+			"peakDbfs": -1,
+			"clippingPercent": 0,
+			"silencePercent": 7.1
+		},
+		"originalPath": "/storage/hf-datasets-cache/all/datasets/16739474757983-config-parquet-and-info-CAiRE-ASCEND-5c1abf9c/downloads/extracted/f0790e45797bd654a35ecd1eb4865fa761f1cbd842b674e0defb6812ae8cffbf/waves/ses4_spk10_L20191_380.860_5.640.wav"
+	},
+	{
+		"id": "05313",
+		"file": "ascend_train_05313.wav",
+		"split": "train",
+		"duration": 7.420000076293945,
+		"language": "mixed",
+		"speakerId": 6,
+		"sessionId": 2,
+		"topic": "education",
+		"quality": {
+			"rmsDbfs": -21.4,
+			"peakDbfs": -4.4,
+			"clippingPercent": 0,
+			"silencePercent": 5.4
+		},
+		"originalPath": "/storage/hf-datasets-cache/all/datasets/16739474757983-config-parquet-and-info-CAiRE-ASCEND-5c1abf9c/downloads/extracted/f0790e45797bd654a35ecd1eb4865fa761f1cbd842b674e0defb6812ae8cffbf/waves/ses2_spk6_L13700_121.8950_7.4200.wav"
+	},
+	{
+		"id": "00037",
+		"file": "ascend_validation_00037.wav",
+		"split": "validation",
+		"duration": 5.519999980926514,
+		"language": "mixed",
+		"speakerId": 20,
+		"sessionId": 4,
+		"topic": "technology",
+		"quality": {
+			"rmsDbfs": -18.7,
+			"peakDbfs": 0,
+			"clippingPercent": 0.026,
+			"silencePercent": 4.7
+		},
+		"originalPath": "/storage/hf-datasets-cache/all/datasets/16739474757983-config-parquet-and-info-CAiRE-ASCEND-5c1abf9c/downloads/extracted/f0790e45797bd654a35ecd1eb4865fa761f1cbd842b674e0defb6812ae8cffbf/waves/ses4_spk20_L1670_145.1500_5.5200.wav"
+	},
+	{
+		"id": "05804",
+		"file": "ascend_train_05804.wav",
+		"split": "train",
+		"duration": 6.300000190734863,
+		"language": "mixed",
+		"speakerId": 9,
+		"sessionId": 3,
+		"topic": "technology",
+		"quality": {
+			"rmsDbfs": -15.8,
+			"peakDbfs": 0,
+			"clippingPercent": 0.03,
+			"silencePercent": 7
+		},
+		"originalPath": "/storage/hf-datasets-cache/all/datasets/16739474757983-config-parquet-and-info-CAiRE-ASCEND-5c1abf9c/downloads/extracted/f0790e45797bd654a35ecd1eb4865fa761f1cbd842b674e0defb6812ae8cffbf/waves/ses3_spk9_L14751_1118.2630_6.3000.wav"
+	}
+]
