@@ -69,7 +69,10 @@ export default function createRspackConfig(environment = {}) {
 
 	return {
 		context: directory,
-		entry: './src/index.ts',
+		entry: {
+			index: './src/index.ts',
+			'audio-smoke': './src/tools/audio-smoke.ts',
+		},
 		target: 'node',
 		mode: debug ? 'development' : 'production',
 		watch,
@@ -105,7 +108,7 @@ export default function createRspackConfig(environment = {}) {
 		plugins,
 		output: {
 			path: outputDirectory,
-			filename: 'index.cjs',
+			filename: '[name].cjs',
 			clean: true,
 			devtoolModuleFilenameTemplate: (info) =>
 				path.resolve(directory, info.resourcePath).split(path.sep).join('/'),

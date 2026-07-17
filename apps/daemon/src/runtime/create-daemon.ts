@@ -17,11 +17,15 @@ import {
 import { UnixSocketServer } from '../transport/unix-socket-server.js';
 
 import type { Socket } from 'node:net';
+import type { AudioCaptureBackend } from '../audio-capture.js';
+import type { RealtimeAsrProvider } from '../realtime-asr.js';
 import type { UnixSocketClient } from '../transport/unix-socket-server.js';
 
 export interface DaemonRuntimeOptions {
 	readonly socketPath: string;
 	readonly fakeText?: string;
+	readonly captureBackend?: AudioCaptureBackend;
+	readonly asrProvider?: RealtimeAsrProvider;
 	readonly maximumContentLength?: number;
 	readonly onError?: (error: Error) => void;
 }
@@ -43,13 +47,13 @@ export function resolveDaemonSocketPath(environment: NodeJS.ProcessEnv = process
 	return path.join(runtimeDirectory, 'voxspell', 'daemon.sock');
 }
 
-/** 组合 Unix Socket、JSON-RPC 和 deterministic 后端的可执行 daemon。 */
+/** 组合 Unix Socket、JSON-RPC 和音频、ASR 后端的可执行 daemon。 */
 export class DaemonRuntime {
 	readonly #server: UnixSocketServer;
 
 	constructor(options: DaemonRuntimeOptions) {
-		const captureBackend = new DeterministicAudioCaptureBackend();
-		const asrProvider = new DeterministicAsrProvider(options.fakeText);
+		const captureBackend = options.captureBackend ?? new DeterministicAudioCaptureBackend();
+		const asrProvider = options.asrProvider ?? new DeterministicAsrProvider(options.fakeText);
 		const maximumContentLength = options.maximumContentLength ?? DEFAULT_MAX_CONTENT_LENGTH;
 		const onError = options.onError ?? (() => undefined);
 
@@ -83,8 +87,8 @@ export class DaemonRuntime {
 
 	#createClient(
 		socket: Socket,
-		captureBackend: DeterministicAudioCaptureBackend,
-		asrProvider: DeterministicAsrProvider,
+		captureBackend: AudioCaptureBackend,
+		asrProvider: RealtimeAsrProvider,
 		maximumContentLength: number,
 		onError: (error: Error) => void,
 	): UnixSocketClient {

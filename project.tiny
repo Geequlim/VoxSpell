@@ -17,9 +17,20 @@ develop:
       command:
         - yarn --cwd packages/protocol vitest run
         - yarn --cwd apps/daemon vitest run
+      actions:
+        - name: fcitx5-addon
+          description: 执行 Fcitx 5 C++ 扩展测试
+          command:
+            - yarn tiny build/fcitx5-addon
+            - ctest --test-dir dist/native/fcitx5-addon --output-on-failure
     - name: smoke
       description: 使用真实 Unix Socket 验证 daemon 闭环
       command: yarn --cwd apps/daemon vitest run test/daemon-runtime.test.ts
+    - name: audio-smoke
+      description: 录制麦克风并显示实时音量
+      command:
+        - yarn --cwd apps/daemon rspack build
+        - yarn --cwd apps/daemon node --enable-source-maps dist/audio-smoke.cjs
     - name: typecheck
       description: 执行 TypeScript 类型检查
       command:
