@@ -1,9 +1,11 @@
 #include "config.h"
+#include "daemon-client.h"
 #include "tap-hold-state.h"
 
 #include <fcitx/addonfactory.h>
 #include <fcitx/addoninstance.h>
 #include <fcitx/addonmanager.h>
+#include <fcitx/candidatelist.h>
 #include <fcitx/event.h>
 #include <fcitx/inputcontext.h>
 #include <fcitx/inputcontextmanager.h>
@@ -16,6 +18,7 @@
 #include <fcitx-utils/event.h>
 #include <fcitx-utils/eventloopinterface.h>
 #include <fcitx-utils/key.h>
+#include <fcitx-utils/trackableobject.h>
 
 #include <cstdint>
 #include <cstdlib>
@@ -28,17 +31,23 @@ namespace voxspell {
 namespace {
 
 constexpr char configFile[] = "conf/voxspell.conf";
-constexpr char activeMessage[] = "🎙 VoxSpell · 本地测试模式";
-constexpr char activeHint[] = "松开按键结束，Esc 取消";
-constexpr char successMessage[] = "✓ VoxSpell 长按交互测试通过";
-constexpr char successHint[] = "语音服务尚未连接";
-constexpr std::uint64_t successMessageDurationUs = 1000000;
+constexpr char connectingMessage[] = "VoxSpell · 正在连接语音服务…";
+constexpr char waitingMessage[] = "VoxSpell · 正在听，等待识别结果…";
+constexpr char streamingMessage[] = "VoxSpell · 正在听";
+constexpr char finishingMessage[] = "VoxSpell · 正在识别…";
+constexpr char finalMessage[] = "VoxSpell · 识别完成";
+constexpr char errorMessage[] = "VoxSpell · 测试 daemon 不可用";
+constexpr char activeHint[] = "松开空格完成，Esc 取消";
+constexpr char finishingHint[] = "请稍候";
+constexpr char errorHint[] = "请先运行 yarn tiny dev/mock-daemon";
+constexpr std::uint64_t errorMessageDurationUs = 1600000;
 
 class InputContextState final : public fcitx::InputContextProperty {
 public:
 	TapHoldPhase phase = TapHoldPhase::Idle;
 	bool replaying = false;
 	bool passingInjectedSpace = false;
+	bool ownsPanel = false;
 	fcitx::Key triggerKey;
 	fcitx::Key triggerRawKey;
 	int triggerPressTime = 0;
@@ -77,6 +86,29 @@ public:
 			fcitx::EventType::InputContextSwitchInputMethod,
 			fcitx::EventWatcherPhase::Default,
 			reset));
+
+		daemonClient_ = std::make_unique<DaemonClient>(
+			instance_->eventLoop(),
+			DaemonClient::Callbacks{
+				.ready = [this]() { handleDaemonReady(); },
+				.started = [this](const std::string &sessionId) {
+					handleSessionStarted(sessionId);
+				},
+				.partial = [this](const protocol::TranscriptPartialParams &params) {
+					handlePartial(params);
+				},
+				.finalTranscript =
+					[this](const protocol::TranscriptFinalParams &params) {
+						handleFinal(params);
+					},
+				.completed = [this](const protocol::SessionCompletedParams &params) {
+					handleCompleted(params);
+				},
+				.error = [this](const std::string &sessionId, const std::string &) {
+					handleDaemonError(sessionId);
+				},
+				.disconnected = [this]() { handleDaemonError({}); },
+			});
 	}
 
 	~VoxSpellAddon() override {
@@ -208,17 +240,19 @@ private:
 			replayTrigger(inputContext, state, eventTime);
 			break;
 		case TapHoldAction::ShowActive:
-			showActive(inputContext);
+			startVoiceSession(inputContext);
 			break;
 		case TapHoldAction::ShowSuccess:
-			showSuccess(inputContext, state);
+			finishVoiceSession(inputContext, state);
 			break;
 		case TapHoldAction::Cancel:
+			cancelVoiceSession(inputContext, "user");
 			clearOwnPanel(inputContext);
 			break;
 		case TapHoldAction::Clear:
 			state.holdTimer.reset();
 			state.feedbackTimer.reset();
+			cancelVoiceSession(inputContext, "focus-lost");
 			clearOwnPanel(inputContext);
 			break;
 		case TapHoldAction::None:
@@ -312,25 +346,53 @@ private:
 		return false;
 	}
 
-	void showActive(fcitx::InputContext *inputContext) {
-		auto &inputPanel = inputContext->inputPanel();
-		inputPanel.setAuxUp(fcitx::Text(activeMessage));
-		inputPanel.setAuxDown(fcitx::Text(activeHint));
-		inputContext->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+	void startVoiceSession(fcitx::InputContext *inputContext) {
+		cancelVoiceSession(nullptr, "replaced");
+		voiceInputContext_ = inputContext->watch();
+		voiceSessionId_.clear();
+		voiceTranscript_.clear();
+		finishRequested_ = false;
+		voiceFailed_ = false;
+		committed_ = false;
+		renderVoicePanel(
+			inputContext,
+			daemonClient_->ready() ? waitingMessage : connectingMessage,
+			activeHint,
+			{});
+		daemonClient_->start(
+			std::to_string(reinterpret_cast<std::uintptr_t>(inputContext)));
 	}
 
-	void showSuccess(fcitx::InputContext *inputContext, InputContextState &state) {
+	void finishVoiceSession(
+		fcitx::InputContext *inputContext,
+		InputContextState &state) {
 		state.holdTimer.reset();
 		state.feedbackTimer.reset();
-		auto &inputPanel = inputContext->inputPanel();
-		inputPanel.setAuxUp(fcitx::Text(successMessage));
-		inputPanel.setAuxDown(fcitx::Text(successHint));
-		inputContext->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+		finishRequested_ = true;
+		if (voiceFailed_) {
+			cancelVoiceSession(inputContext, "user");
+			showTimedError(inputContext, state);
+			return;
+		}
+		renderVoicePanel(
+			inputContext,
+			finishingMessage,
+			finishingHint,
+			voiceTranscript_);
+		if (!voiceSessionId_.empty()) {
+			daemonClient_->finish(voiceSessionId_);
+		}
+	}
+
+	void showTimedError(
+		fcitx::InputContext *inputContext,
+		InputContextState &state) {
+		renderVoicePanel(inputContext, errorMessage, errorHint, {});
 
 		auto inputContextReference = inputContext->watch();
 		state.feedbackTimer = instance_->eventLoop().addTimeEvent(
 			CLOCK_MONOTONIC,
-			fcitx::now(CLOCK_MONOTONIC) + successMessageDurationUs,
+			fcitx::now(CLOCK_MONOTONIC) + errorMessageDurationUs,
 			0,
 			[this, inputContextReference](fcitx::EventSourceTime *, std::uint64_t) {
 				auto *currentInputContext = inputContextReference.get();
@@ -346,19 +408,142 @@ private:
 		state.feedbackTimer->setOneShot();
 	}
 
-	void clearOwnPanel(fcitx::InputContext *inputContext) {
+	void renderVoicePanel(
+		fcitx::InputContext *inputContext,
+		const std::string &status,
+		const std::string &hint,
+		const std::string &transcript) {
+		auto *state = inputContext->propertyFor(&stateFactory_);
+		state->ownsPanel = true;
 		auto &inputPanel = inputContext->inputPanel();
-		const auto auxUp = inputPanel.auxUp().toString();
-		if (auxUp != activeMessage && auxUp != successMessage) {
+		inputPanel.setAuxUp(fcitx::Text(status));
+		inputPanel.setAuxDown(fcitx::Text(hint));
+		if (transcript.empty()) {
+			inputPanel.setCandidateList(nullptr);
+		} else {
+			auto candidates = std::make_unique<fcitx::DisplayOnlyCandidateList>();
+			candidates->setContent(std::vector<std::string>{transcript});
+			candidates->setCursorIndex(0);
+			candidates->setLayoutHint(fcitx::CandidateLayoutHint::Vertical);
+			inputPanel.setCandidateList(std::move(candidates));
+		}
+		inputContext->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+	}
+
+	void handleDaemonReady() {
+		auto *inputContext = voiceInputContext_.get();
+		if (!inputContext || !voiceSessionId_.empty() || voiceFailed_) {
 			return;
 		}
+		renderVoicePanel(
+			inputContext,
+			waitingMessage,
+			activeHint,
+			voiceTranscript_);
+	}
 
+	void handleSessionStarted(const std::string &sessionId) {
+		auto *inputContext = voiceInputContext_.get();
+		if (!inputContext) {
+			daemonClient_->cancel(sessionId, "focus-lost");
+			return;
+		}
+		voiceSessionId_ = sessionId;
+		if (finishRequested_) {
+			daemonClient_->finish(voiceSessionId_);
+		}
+	}
+
+	void handlePartial(const protocol::TranscriptPartialParams &params) {
+		auto *inputContext = voiceInputContext_.get();
+		if (!inputContext || params.sessionId != voiceSessionId_ || finishRequested_) {
+			return;
+		}
+		voiceTranscript_ = params.text;
+		renderVoicePanel(
+			inputContext,
+			streamingMessage,
+			activeHint,
+			voiceTranscript_);
+	}
+
+	void handleFinal(const protocol::TranscriptFinalParams &params) {
+		auto *inputContext = voiceInputContext_.get();
+		if (!inputContext || params.sessionId != voiceSessionId_) {
+			return;
+		}
+		voiceTranscript_ = params.text;
+		renderVoicePanel(
+			inputContext,
+			finalMessage,
+			finishingHint,
+			voiceTranscript_);
+	}
+
+	void handleCompleted(const protocol::SessionCompletedParams &params) {
+		auto *inputContext = voiceInputContext_.get();
+		if (!inputContext || params.sessionId != voiceSessionId_ || committed_) {
+			return;
+		}
+		committed_ = true;
+		if (!params.text.empty()) {
+			inputContext->commitString(params.text);
+		}
+		clearOwnPanel(inputContext);
+		voiceInputContext_.unwatch();
+		voiceSessionId_.clear();
+		voiceTranscript_.clear();
+		finishRequested_ = false;
+	}
+
+	void handleDaemonError(const std::string &sessionId) {
+		auto *inputContext = voiceInputContext_.get();
+		if (!inputContext ||
+			(!sessionId.empty() && sessionId != voiceSessionId_)) {
+			return;
+		}
+		voiceFailed_ = true;
+		renderVoicePanel(inputContext, errorMessage, errorHint, {});
+	}
+
+	void cancelVoiceSession(
+		fcitx::InputContext *inputContext,
+		std::string reason) {
+		auto *activeInputContext = voiceInputContext_.get();
+		if (inputContext && inputContext != activeInputContext) {
+			return;
+		}
+		if (!activeInputContext) {
+			return;
+		}
+		if (voiceSessionId_.empty()) {
+			daemonClient_->cancelPendingStart();
+		} else {
+			daemonClient_->cancel(voiceSessionId_, std::move(reason));
+		}
+		voiceInputContext_.unwatch();
+		voiceSessionId_.clear();
+		voiceTranscript_.clear();
+		finishRequested_ = false;
+		voiceFailed_ = false;
+		committed_ = false;
+	}
+
+	void clearOwnPanel(fcitx::InputContext *inputContext) {
+		auto *state = inputContext->propertyFor(&stateFactory_);
+		if (!state->ownsPanel) {
+			return;
+		}
+		state->ownsPanel = false;
+		auto &inputPanel = inputContext->inputPanel();
 		inputPanel.setAuxUp(fcitx::Text());
 		inputPanel.setAuxDown(fcitx::Text());
+		inputPanel.setCandidateList(nullptr);
 		inputContext->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
 	}
 
 	void resetInputContext(fcitx::InputContext *inputContext, bool updateUi) {
+		cancelVoiceSession(inputContext, "focus-lost");
 		auto *state = inputContext->propertyFor(&stateFactory_);
 		state->phase = TapHoldPhase::Idle;
 		state->passingInjectedSpace = false;
@@ -377,6 +562,13 @@ private:
 	}
 
 	fcitx::Instance *instance_;
+	std::unique_ptr<DaemonClient> daemonClient_;
+	fcitx::TrackableObjectReference<fcitx::InputContext> voiceInputContext_;
+	std::string voiceSessionId_;
+	std::string voiceTranscript_;
+	bool finishRequested_ = false;
+	bool voiceFailed_ = false;
+	bool committed_ = false;
 	VoxSpellConfig config_;
 	fcitx::SimpleInputContextPropertyFactory<InputContextState> stateFactory_;
 	std::vector<std::unique_ptr<fcitx::HandlerTableEntry<fcitx::EventHandler>>>

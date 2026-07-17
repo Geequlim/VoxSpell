@@ -9,10 +9,13 @@ find_package(Fcitx5Core 5.1.0 REQUIRED)
 
 add_library(voxspell MODULE
 	src/addon.cpp
+	src/content-length-codec.cpp
+	src/daemon-client.cpp
 	src/tap-hold-state.cpp
 )
 
-target_compile_features(voxspell PRIVATE cxx_std_20)
+target_compile_features(voxspell PRIVATE cxx_std_23)
+target_include_directories(voxspell PRIVATE third_party/glaze/include)
 target_link_libraries(voxspell PRIVATE Fcitx5::Core)
 
 set_target_properties(voxspell PROPERTIES
@@ -39,4 +42,32 @@ if(BUILD_TESTING)
 	target_include_directories(tap-hold-state-test PRIVATE src)
 	set_target_properties(tap-hold-state-test PROPERTIES CXX_EXTENSIONS OFF)
 	add_test(NAME tap-hold-state COMMAND tap-hold-state-test)
+
+	add_executable(content-length-codec-test
+		test/content-length-codec-test.cpp
+		src/content-length-codec.cpp
+	)
+	target_compile_features(content-length-codec-test PRIVATE cxx_std_23)
+	target_include_directories(content-length-codec-test PRIVATE src)
+	set_target_properties(content-length-codec-test PROPERTIES CXX_EXTENSIONS OFF)
+	add_test(NAME content-length-codec COMMAND content-length-codec-test)
+
+	add_executable(daemon-client-smoke
+		test/daemon-client-smoke.cpp
+		src/content-length-codec.cpp
+		src/daemon-client.cpp
+	)
+	target_compile_features(daemon-client-smoke PRIVATE cxx_std_23)
+	target_include_directories(daemon-client-smoke PRIVATE
+		src
+		third_party/glaze/include
+	)
+	target_link_libraries(daemon-client-smoke PRIVATE Fcitx5::Core)
+	set_target_properties(daemon-client-smoke PROPERTIES CXX_EXTENSIONS OFF)
+	add_test(
+		NAME daemon-client-smoke
+		COMMAND "${CMAKE_COMMAND}" -E env node
+			"${CMAKE_CURRENT_SOURCE_DIR}/test/run-daemon-client-smoke.mjs"
+			"$<TARGET_FILE:daemon-client-smoke>"
+	)
 endif()
