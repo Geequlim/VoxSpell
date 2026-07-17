@@ -1,0 +1,7 @@
+[Addon]
+Name=VoxSpell
+Category=Module
+Version=@PROJECT_VERSION@
+Library=voxspell
+Type=SharedLibrary
+OnDemand=False

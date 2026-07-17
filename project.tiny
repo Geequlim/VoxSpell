@@ -6,11 +6,20 @@ develop:
     - name: start
       description: 运行已构建的 daemon bundle
       command: yarn --cwd apps/daemon node --enable-source-maps dist/index.cjs
+    - name: install-fcitx5-addon
+      description: 构建、安装并重启 Fcitx 5 C++ 扩展
+      command:
+        - yarn tiny build/fcitx5-addon
+        - cmake --install dist/native/fcitx5-addon --prefix $HOME/.local
+        - fcitx5 -r -d
     - name: test
       description: 执行单元测试
       command:
         - yarn --cwd packages/protocol vitest run
         - yarn --cwd apps/daemon vitest run
+    - name: smoke
+      description: 使用真实 Unix Socket 验证 daemon 闭环
+      command: yarn --cwd apps/daemon vitest run test/daemon-runtime.test.ts
     - name: typecheck
       description: 执行 TypeScript 类型检查
       command:
@@ -40,6 +49,12 @@ publish:
     - name: build
       description: 构建 daemon bundle
       command: yarn --cwd apps/daemon rspack build
+      actions:
+        - name: fcitx5-addon
+          description: 构建 Fcitx 5 C++ 扩展
+          command:
+            - cmake -S native/fcitx5-addon -B dist/native/fcitx5-addon -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+            - cmake --build dist/native/fcitx5-addon
 
 tools:
   actions:
