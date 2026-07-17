@@ -207,7 +207,7 @@ JSON-RPC 解析错误、无效请求、方法不存在和参数错误使用标�
 
 ```text
 idle
-  -> starting
+  -> starting (client phase: preparing)
   -> recording
   -> finishing
   -> recognizing

@@ -5,7 +5,8 @@
 ## 1. 完整流程
 
 ```text
-录音
+准备 ASR 与麦克风
+  -> 录音
   -> 实时识别与纠错
   -> 确定性处理（词典、数字、格式）
   -> 识别结果
@@ -18,14 +19,16 @@
 daemon 通过 `session.phase` 明确通知以下客户端可见阶段：
 
 ```text
-recording -> recognizing -> processing -> polishing -> choosing
+preparing -> recording -> recognizing -> processing -> polishing -> choosing
 ```
 
-`polishing` 和 `choosing` 仅在启用 AI 润色时出现。启动、结束录音和资源清理等内部状态不暴露给客户端。
+`preparing` 表示 daemon 正在连接 ASR 并初始化麦克风，此时客户端不能提示用户讲话。`recording` 仅在 ASR 与麦克风均已就绪后发送，是客户端提示“请开始讲话”的唯一依据。`polishing` 和 `choosing` 仅在启用 AI 润色时出现；结束录音和资源清理等内部状态不暴露给客户端。
+
+`preparing` 可能在 `session.start` 请求仍处于 pending 时到达；通知携带的 `sessionId` 与随后成功响应中的 ID 相同。客户端必须正常处理请求完成前到达的会话通知，并且只能在收到 `recording` 后播放开始讲话提示。若准备失败，daemon 发送 `session.error`，同时 `session.start` 返回错误。
 
 ## 2. 文本数据
 
-实时 ASR 阶段使用 `session.preview` 推送当前完整文本。ASR 的分段、修订和乱序合并由 daemon 处理，客户端收到通知后整体替换，不拼接增量内容。
+实时 ASR 阶段使用 `session.preview` 推送当前完整文本。ASR 的分段、修订和乱序合并由 daemon 处理，客户端收到通知后整体替换，不拼接增量内容。收到 partial 和 segment-final 时会话阶段仍保持 `recording`；只有客户端调用 `session.finish`、录音停止并开始等待最终识别结果后，daemon 才发送 `recognizing`。
 
 确定性处理完成后，daemon 产生不可变的 `transcript`。它是经过词典、数字和格式处理的识别结果，不是供应商返回的原始文本。
 
