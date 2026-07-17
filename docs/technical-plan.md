@@ -116,6 +116,8 @@ Rust worker 使用 `pipewire-rs`，继续保持独立进程，并沿用 stdout P
 
 ## 3. 进程与数据流
 
+会话阶段、结果展示、候选选择和提交语义以 [语音输入会话流程](./session-flow.md) 为准。
+
 ```text
 用户按下 PTT
   -> Fcitx C++ module 发送 session.start
@@ -131,9 +133,10 @@ Rust worker 使用 `pipewire-rs`，继续保持独立进程，并沿用 stdout P
   -> 实时 Provider 发送 ASR end 并等待供应商 final
   -> 批量 Provider 将 PCM 封装为 WAV 后上传并等待转写结果
   -> 用户词典和数字后处理
-  -> 可选 AI 润色
-  -> 输出校验
-  -> Fcitx module 提交最终文本
+  -> 产生识别结果
+  -> 可选 AI 流式润色并产生润色结果
+  -> 客户端自动选择或等待用户确认
+  -> daemon 通知 Fcitx module 提交选中的文本
 ```
 
 取消条件：
@@ -164,29 +167,27 @@ initialize
 session.start
 session.finish
 session.cancel
+session.selectResult
 config.reload
 daemon.ping
 ```
 
 连接建立后必须先完成 `initialize`。请求携带客户端信息和支持的 `protocolVersion`，daemon 返回协商后的版本、服务端信息与 capability。初始化前收到其他业务请求时返回 JSON-RPC 错误。
 
-`session.start` 成功后由 daemon 生成并返回 `sessionId`。后续会话请求和服务端通知在 params 中携带该 ID。Unix stream 已保证同一连接上的消息顺序，因此不再维护全局 `sequence`；partial 覆盖仍使用 segment 内单调递增的 `revision`。
+`session.start` 成功后由 daemon 生成并返回 `sessionId`。后续会话请求和服务端通知在 params 中携带该 ID。Unix stream 已保证同一连接上的消息顺序，因此不再维护全局 `sequence`；Provider 的 partial 修订只在 daemon 内部组装，客户端只接收完整文本快照。
 
 ### 4.3 服务端通知
 
 ```text
 daemon.ready
-session.recording
-asr.ready
-transcript.partial
-transcript.segmentFinal
-transcript.final
-polish.started
-polish.delta
-polish.final
+session.phase
+session.preview
+session.results
 session.completed
 session.error
 ```
+
+客户端只整体替换 `session.preview` 和 `session.results` 中的文本，不拼接 ASR 分片或 AI SSE delta。`session.completed` 是唯一提交点；完整事件语义见 [语音输入会话流程](./session-flow.md)。
 
 ### 4.4 Schema 与类型规范
 
@@ -209,8 +210,10 @@ idle
   -> starting
   -> recording
   -> finishing
-  -> post-processing
+  -> recognizing
+  -> processing
   -> polishing (optional)
+  -> choosing (optional)
   -> completed
 
 任意活动状态
@@ -370,11 +373,12 @@ ASR final
   -> Unicode 与空白基础清理
   -> 用户词典别名归一
   -> 数字、日期、时间、百分比和编号归一化
-  -> 保存 deterministic original
+  -> 保存识别结果 transcript
   -> 可选 AI 润色
   -> 再次应用词典与数字规则
   -> 输出校验
-  -> final text
+  -> 保存润色结果 polished
+  -> 客户端选择提交结果
 ```
 
 确定性处理必须满足：
@@ -411,9 +415,9 @@ export interface TextPolisher {
 - 长度变化超过配置阈值时回退。
 - 必须保留受保护的标准词。
 - 不能输出 thinking 标签、Markdown 说明或多余前缀。
-- 任意错误都保留 deterministic original。
+- 任意错误都保留识别结果 `transcript`。
 
-Fcitx UI 中润色期间显示流式预览；失败时展示原文候选，用户可以直接提交原文。
+daemon 始终向客户端提供识别结果和润色结果。自动模式仅展示流式润色结果并在完成后选择推荐项；手动模式将润色结果作为默认第一候选，将识别结果作为第二候选。AI 失败时推荐项回退为识别结果。具体行为见 [语音输入会话流程](./session-flow.md)。
 
 ## 11. 推荐仓库结构
 
@@ -473,7 +477,7 @@ $XDG_RUNTIME_DIR/voxspell/daemon.sock
 - ASR 中途断开：首期不静默重连并拼接结果，避免重复和漏字；保留已获得的稳定文本作为可选回退。
 - daemon 不在线：Fcitx module 快速提示，不阻塞按键链路，并以退避策略重连。
 - `pw-record` 异常退出：终止对应云会话，保留脱敏 stderr 摘要并清理 UI。
-- AI 失败：自动回退 deterministic original，不让本次语音输入丢失。
+- AI 失败：将推荐结果回退为识别结果，不让本次语音输入丢失。
 - Fcitx input context 消失：立即取消会话，禁止向新的应用窗口提交旧结果。
 
 是否支持保存整段 PCM 后自动重放重试，应在后续通过隐私、费用和重复识别风险评估后决定，首期默认不保存音频文件。
@@ -596,10 +600,11 @@ $XDG_RUNTIME_DIR/voxspell/daemon.sock
 ### 阶段 6：AI 润色
 
 - 实现 TextPolisher 和 OpenAI-compatible provider。
-- 实现流式预览、取消、输出校验和原文回退。
+- 实现完整结果快照、取消、输出校验和识别结果回退。
+- 实现 `session.selectResult`，让客户端决定自动选择还是等待用户确认。
 - 完成 Fcitx 候选交互。
 
-完成标准：AI 成功时提交校验后的文本，任意失败时原文仍可一键提交。
+完成标准：AI 成功时同时提供润色结果与识别结果，默认推荐润色结果；自动与手动模式通过同一选择请求完成唯一一次提交，任意失败时识别结果仍可提交。
 
 ### 阶段 7：发布与多 Provider
 

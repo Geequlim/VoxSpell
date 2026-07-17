@@ -3,9 +3,16 @@ develop:
     - name: dev
       description: 启动 daemon 开发环境
       command: yarn --cwd apps/daemon rspack build --env watch=true,run=true,debug=true
+      actions:
+        - name: asr
+          description: 使用 config.yaml 中的真实 ASR Provider 启动 daemon 开发环境
+          command: VOXSPELL_CONFIG_PATH=../../configs/config.yaml yarn --cwd apps/daemon rspack build --env watch=true,run=true,debug=true
     - name: start
       description: 运行已构建的 daemon bundle
       command: yarn --cwd apps/daemon node --enable-source-maps dist/index.cjs
+    - name: mock-daemon
+      description: 启动供 C++ 扩展联调的延迟测试 daemon
+      command: node native/fcitx5-addon/test/mock-daemon/mock-daemon.mjs
     - name: install-fcitx5-addon
       description: 构建、安装并重启 Fcitx 5 C++ 扩展
       command:

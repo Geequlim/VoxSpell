@@ -1,7 +1,7 @@
 version: 1
 
 asr:
-  activeProvider: openrouter
+  activeProvider: glm
   providers:
     - id: openrouter
       type: openai-compatible-transcription
