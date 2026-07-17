@@ -120,6 +120,7 @@ describe('DaemonRuntime', () => {
 			'session.phase',
 			'session.preview',
 			'session.phase',
+			'session.phase',
 			'session.results',
 			'session.completed',
 		]);

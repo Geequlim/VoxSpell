@@ -80,6 +80,10 @@ export default function createRspackConfig(environment = {}) {
 		watch,
 		devtool: 'source-map',
 		externalsPresets: { node: true },
+		externals: {
+			bufferutil: 'commonjs bufferutil',
+			'utf-8-validate': 'commonjs utf-8-validate',
+		},
 		module: {
 			rules: [
 				{

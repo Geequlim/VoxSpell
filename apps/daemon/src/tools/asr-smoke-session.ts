@@ -14,11 +14,13 @@ export class AsrSmokeError extends Error {
 export async function transcribeFrames(
 	provider: RealtimeAsrProvider,
 	frames: AsyncIterable<Uint8Array>,
+	onEvent?: (event: AsrEvent) => void,
 ): Promise<string> {
 	const session = await provider.createSession({ sessionId: randomUUID() });
 	const controller = new AbortController();
 	const result = (async (): Promise<string> => {
 		for await (const event of session.events()) {
+			onEvent?.(event);
 			const text = getCompletedText(event);
 			if (text !== undefined) return text;
 		}

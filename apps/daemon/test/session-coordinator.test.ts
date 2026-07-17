@@ -54,6 +54,21 @@ async function completeAsr(context: TestContext, text: string): Promise<void> {
 }
 
 describe('SessionCoordinator', () => {
+	it('announces preparing before asynchronous startup and recording only when ready', async () => {
+		const context = createTestContext();
+		const start = context.coordinator.start('input-context-1');
+
+		expect(context.events).toEqual([
+			{ method: 'session.phase', params: { sessionId: SESSION_ID, phase: 'preparing' } },
+		]);
+		await expect(start).resolves.toEqual({ sessionId: SESSION_ID });
+		expect(context.events.at(-1)).toEqual({
+			method: 'session.phase',
+			params: { sessionId: SESSION_ID, phase: 'recording' },
+		});
+		await context.coordinator.cancel(SESSION_ID, 'user');
+	});
+
 	it('publishes corrected preview snapshots and completes without AI polish', async () => {
 		const context = createTestContext();
 		const result = await context.coordinator.start('input-context-1');
@@ -91,6 +106,7 @@ describe('SessionCoordinator', () => {
 				.map((event) => event.params.text),
 		).toEqual(['今天下午三点开会', '今天下午三点我们开会']);
 		expect(context.events.filter((event) => event.method === 'session.phase')).toEqual([
+			{ method: 'session.phase', params: { sessionId: SESSION_ID, phase: 'preparing' } },
 			{ method: 'session.phase', params: { sessionId: SESSION_ID, phase: 'recording' } },
 			{ method: 'session.phase', params: { sessionId: SESSION_ID, phase: 'recognizing' } },
 			{ method: 'session.phase', params: { sessionId: SESSION_ID, phase: 'processing' } },

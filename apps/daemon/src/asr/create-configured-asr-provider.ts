@@ -1,4 +1,5 @@
 import { OpenAiCompatibleAsrProvider } from '@voxspell/asr-openai-compatible/openai-compatible-asr-provider';
+import { TencentRealtimeAsrProvider } from '@voxspell/asr-tencent/tencent-asr-provider';
 import { resolveAsrProvider } from '@voxspell/config/asr-provider';
 import { loadVoxSpellConfig } from '@voxspell/config/load-config';
 
@@ -16,6 +17,15 @@ export async function createConfiguredAsrProvider(
 		environment,
 		providerId ?? config.asr.activeProvider,
 	);
+	if (provider.type === 'tencent-realtime') {
+		return new TencentRealtimeAsrProvider({
+			id: provider.id,
+			appId: provider.appId,
+			secretId: provider.secretId,
+			secretKey: provider.secretKey,
+			engineModelType: provider.engineModelType,
+		});
+	}
 	return new OpenAiCompatibleAsrProvider({
 		id: provider.id,
 		apiKey: provider.apiKey,

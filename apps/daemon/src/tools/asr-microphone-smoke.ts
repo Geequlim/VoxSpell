@@ -3,8 +3,12 @@ import { PcmLevelMeter } from '../audio/pcm-level.js';
 import { PwRecordAudioCaptureBackend } from '../audio/pw-record-audio-capture.js';
 import { transcribeFrames } from './asr-smoke-session.js';
 
+import type { AsrEvent } from '@voxspell/asr-core/realtime-asr';
+
 const CAPTURE_MILLISECONDS = 10_000;
 const BAR_WIDTH = 30;
+let latestPeakDbfs = -96;
+let latestPartial = '';
 
 /** 将音频峰值渲染为终端音量条。 */
 function renderPeak(peakDbfs: number): string {
@@ -32,8 +36,8 @@ async function* captureMicrophone(): AsyncIterable<Uint8Array> {
 	try {
 		for await (const frame of session.frames()) {
 			for (const level of meter.write(frame)) {
-				const output = `麦克风 [${renderPeak(level.peakDbfs)}] Peak ${level.peakDbfs.toFixed(1)} dBFS`;
-				process.stdout.write(process.stdout.isTTY ? `\r${output}` : `${output}\n`);
+				latestPeakDbfs = level.peakDbfs;
+				renderInteractiveStatus();
 			}
 			yield frame;
 		}
@@ -41,7 +45,7 @@ async function* captureMicrophone(): AsyncIterable<Uint8Array> {
 		clearTimeout(timeout);
 		await stop();
 		process.off('SIGINT', handleInterrupt);
-		if (process.stdout.isTTY) process.stdout.write('\n');
+		clearInteractiveStatus();
 	}
 }
 
@@ -50,11 +54,42 @@ async function main(): Promise<void> {
 	const configPath = process.env.VOXSPELL_CONFIG_PATH;
 	if (!configPath) throw new Error('VOXSPELL_CONFIG_PATH is required');
 	const provider = await createConfiguredAsrProvider(configPath);
-	console.log(`开始录音 10 秒，结束后请求 ${provider.id}；按 Ctrl+C 可提前结束录音。`);
+	console.log(`开始录音 10 秒并流式发送给 ${provider.id}；按 Ctrl+C 可提前结束录音。`);
 	const startedAt = performance.now();
-	const text = await transcribeFrames(provider, captureMicrophone());
+	const text = await transcribeFrames(provider, captureMicrophone(), printAsrEvent);
 	const elapsedMilliseconds = Math.round(performance.now() - startedAt);
 	console.log(`识别完成 (${elapsedMilliseconds}ms): ${text}`);
+}
+
+/** 输出实时识别修订，最终文本仍由主流程统一展示。 */
+function printAsrEvent(event: AsrEvent): void {
+	if (event.type === 'partial') {
+		latestPartial = event.text;
+		if (process.stdout.isTTY) renderInteractiveStatus();
+		else console.log(`[实时修订 r${event.revision}] ${event.text}`);
+	} else if (event.type === 'segment-final') {
+		clearInteractiveStatus();
+		console.log(`[句段稳定] ${event.text}`);
+		latestPartial = '';
+		renderInteractiveStatus();
+	}
+}
+
+/** 在交互终端的同一行更新音量和当前非稳态识别结果。 */
+function renderInteractiveStatus(): void {
+	if (!process.stdout.isTTY) return;
+	const meter = `麦克风 [${renderPeak(latestPeakDbfs)}] Peak ${latestPeakDbfs.toFixed(1)} dBFS`;
+	const transcript = latestPartial ? `  识别: ${latestPartial}` : '';
+	process.stdout.clearLine(0);
+	process.stdout.cursorTo(0);
+	process.stdout.write(`${meter}${transcript}`);
+}
+
+/** 清除交互终端中尚未换行的动态状态。 */
+function clearInteractiveStatus(): void {
+	if (!process.stdout.isTTY) return;
+	process.stdout.clearLine(0);
+	process.stdout.cursorTo(0);
 }
 
 void main().catch((error) => {

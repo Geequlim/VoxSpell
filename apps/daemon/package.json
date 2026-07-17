@@ -7,6 +7,7 @@
 		"@voxspell/ai-polisher": "workspace:^",
 		"@voxspell/asr-core": "workspace:^",
 		"@voxspell/asr-openai-compatible": "workspace:^",
+		"@voxspell/asr-tencent": "workspace:^",
 		"@voxspell/config": "workspace:^",
 		"@voxspell/protocol": "workspace:^",
 		"@voxspell/text-pipeline": "workspace:^",

@@ -119,6 +119,7 @@ export class SessionCoordinator {
 			transcriptAssembler: new TranscriptAssembler(),
 		};
 		this.#active = active;
+		this.#announcePhase(active, 'preparing');
 
 		try {
 			active.asr = await this.#asrProvider.createSession({ sessionId: active.id });
@@ -331,7 +332,6 @@ export class SessionCoordinator {
 			case 'segment-final': {
 				const text = active.transcriptAssembler.update(event);
 				if (text === undefined) return false;
-				this.#announcePhase(active, 'recognizing');
 				this.#publish({
 					method: 'session.preview',
 					params: { sessionId: active.id, text },
