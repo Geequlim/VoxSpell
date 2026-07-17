@@ -1,0 +1,24 @@
+{
+	// UI Setting:
+	// TypeScript 7 > Experimental: Use Tsgo
+	"js/ts.experimental.useTsgo": true,
+
+	// Optional: use a local TypeScript package directory.
+	"js/ts.tsdk.path": "./node_modules/typescript",
+
+	"oxc.enable": true,
+	"oxc.enable.oxlint": true,
+	"oxc.enable.oxfmt": true,
+	"oxc.configPath": "./oxlint.config.mts",
+	"oxc.fmt.configPath": "./.oxfmtrc.json",
+	"oxc.tsConfigPath": "./apps/daemon/tsconfig.json",
+
+	"[typescript]": {
+		"editor.defaultFormatter": "oxc.oxc-vscode",
+		"editor.formatOnSave": false,
+		"editor.codeActionsOnSave": {
+			"source.format.oxc": "always",
+			"source.fixAll.oxc": "always"
+		}
+	}
+}
