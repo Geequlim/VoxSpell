@@ -2,7 +2,7 @@ develop:
   actions:
     - name: dev
       description: 启动 daemon 开发环境
-      command: yarn --cwd apps/daemon concurrently --kill-others "yarn rspack build --watch" "yarn nodemon"
+      command: yarn --cwd apps/daemon rspack build --env watch=true,run=true,debug=true
     - name: start
       description: 运行已构建的 daemon bundle
       command: yarn --cwd apps/daemon node --enable-source-maps dist/index.cjs

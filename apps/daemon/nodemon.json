@@ -1,7 +1,0 @@
-{
-	"watch": ["dist/index.cjs"],
-	"ext": "cjs",
-	"delay": 100,
-	"signal": "SIGTERM",
-	"exec": "node --enable-source-maps dist/index.cjs"
-}

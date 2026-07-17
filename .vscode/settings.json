@@ -6,6 +6,17 @@
 	// Optional: use a local TypeScript package directory.
 	"js/ts.tsdk.path": "./node_modules/typescript",
 
+	"debug.javascript.autoAttachFilter": "onlyWithFlag",
+	"debug.javascript.autoAttachSmartPattern": [
+		"${workspaceFolder}/apps/daemon/dist/*",
+		"!**/node_modules/**"
+	],
+	"debug.javascript.terminalOptions": {
+		"sourceMaps": true,
+		"cwd": "${workspaceFolder}",
+		"skipFiles": ["<node_internals>/**"]
+	},
+
 	"oxc.enable": true,
 	"oxc.enable.oxlint": true,
 	"oxc.enable.oxfmt": true,
