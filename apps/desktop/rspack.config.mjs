@@ -41,6 +41,9 @@ export default {
 	},
 	resolve: {
 		extensions: ['.ts', '.js'],
+		extensionAlias: {
+			'.js': ['.ts', '.js'],
+		},
 	},
 	plugins: [
 		new TsCheckerRspackPlugin({

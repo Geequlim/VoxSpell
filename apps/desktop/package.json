@@ -4,8 +4,10 @@
 	"private": true,
 	"type": "module",
 	"dependencies": {
+		"@voxspell/protocol": "workspace:^",
 		"mobx": "6.16.1",
-		"node-gtk": "4.1.1"
+		"node-gtk": "4.1.1",
+		"vscode-jsonrpc": "9.0.1"
 	},
 	"devDependencies": {
 		"@rspack/cli": "2.1.4",

@@ -2163,11 +2163,13 @@ __metadata:
     "@rspack/cli": "npm:2.1.4"
     "@rspack/core": "npm:2.1.4"
     "@types/node": "npm:24.13.3"
+    "@voxspell/protocol": "workspace:^"
     mobx: "npm:6.16.1"
     node-gtk: "npm:4.1.1"
     ts-checker-rspack-plugin: "npm:1.5.2"
     typescript: "npm:7.0.2"
     vitest: "npm:4.1.10"
+    vscode-jsonrpc: "npm:9.0.1"
   languageName: unknown
   linkType: soft
 

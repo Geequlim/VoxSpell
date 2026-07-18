@@ -1,24 +1,31 @@
-import { action, derived, state, value } from './state/index';
+import { DaemonState } from './state/daemon-state';
+import { action, state, value } from './state/index';
+
+import type { PageId } from './pages/page-definition';
+import type { DaemonClient } from './state/daemon-state';
 
 /** 桌面配置应用的顶层界面状态。 */
 @state
 export class DesktopState {
-	@value private $ready = false;
+	readonly daemon: DaemonState;
+	@value currentPage: PageId = 'overview';
 
-	/** 概览页当前的主标题。 */
-	@derived get statusTitle(): string {
-		return this.$ready ? 'VoxSpell 已准备就绪' : '正在启动 VoxSpell';
+	constructor(client: DaemonClient) {
+		this.daemon = new DaemonState(client);
 	}
 
-	/** 概览页当前的说明文本。 */
-	@derived get statusDescription(): string {
-		return this.$ready
-			? 'GTK 配置应用已成功启动。Daemon 连接将在后续阶段接入。'
-			: '正在初始化 GTK 界面。';
+	/** 启动需要随窗口存活的后台连接。 */
+	start(): void {
+		this.daemon.start();
 	}
 
-	/** 标记桌面窗口已完成构建。 */
-	@action markReady(): void {
-		this.$ready = true;
+	/** 切换主内容区页面。 */
+	@action selectPage(page: PageId): void {
+		this.currentPage = page;
+	}
+
+	/** 释放窗口持有的全部后台资源。 */
+	dispose(): void {
+		this.daemon.dispose();
 	}
 }
