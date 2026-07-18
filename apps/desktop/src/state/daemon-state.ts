@@ -46,10 +46,10 @@ export class DaemonState {
 		if (this.connectionPhase !== 'connected') {
 			return this.lastError ?? 'Daemon 尚未启动，可通过右侧按钮启动。';
 		}
-		if (this.status?.lastError) return this.status.lastError;
 		if (this.status?.state === 'needs-configuration') {
 			return 'Daemon 已运行，等待补充识别服务配置。';
 		}
+		if (this.status?.lastError) return this.status.lastError;
 		const server = this.initializeResult?.serverInfo;
 		return server ? `${server.name} ${server.version}` : '本地服务运行正常。';
 	}

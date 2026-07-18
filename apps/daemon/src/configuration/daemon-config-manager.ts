@@ -97,9 +97,20 @@ export class DaemonConfigManager {
 		try {
 			await this.reload();
 		} catch (error) {
-			if (this.#asrProvider) return;
-			this.#state =
-				error instanceof VoxSpellConfigNotFoundError ? 'needs-configuration' : 'degraded';
+			if (!(error instanceof VoxSpellConfigNotFoundError)) return;
+			try {
+				await saveVoxSpellConfig(
+					this.#paths.directory,
+					this.#paths.configFile,
+					createDefaultConfig(),
+				);
+				await this.reload();
+			} catch (creationError) {
+				if (!this.#asrProvider) {
+					this.#recordFailure(creationError);
+					if (this.#config) this.#state = 'needs-configuration';
+				}
+			}
 		}
 	}
 
@@ -325,4 +336,25 @@ export class DaemonConfigManager {
 		);
 		return result;
 	}
+}
+
+/** 创建 daemon 首次启动时写入的最小合法配置。 */
+function createDefaultConfig(): VoxSpellConfig {
+	return {
+		version: 1,
+		asr: {
+			activeProvider: 'openai',
+			providers: [
+				{
+					id: 'openai',
+					type: 'openai-compatible-transcription',
+					baseUrl: 'https://api.openai.com/v1',
+					apiKeyEnvironment: 'OPENAI_API_KEY',
+					model: 'whisper-1',
+				},
+			],
+		},
+		session: { maximumRecordingSeconds: DEFAULT_MAXIMUM_RECORDING_SECONDS },
+		textProcessing: { trimTrailingPeriod: false },
+	};
 }

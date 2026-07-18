@@ -53,6 +53,7 @@ export class ConfigState {
 	private $disposed = false;
 	private $saveTimer?: NodeJS.Timeout;
 	private $savePromise?: Promise<void>;
+	private $savePending = false;
 	private $saveRequested = false;
 	private readonly $credentialNamesReadyToSave = new Set<string>();
 
@@ -293,6 +294,7 @@ export class ConfigState {
 		this.$loaded = false;
 		if (this.$saveTimer) clearTimeout(this.$saveTimer);
 		this.$saveTimer = undefined;
+		this.$savePending = false;
 		this.$saveRequested = false;
 		this.$credentialNamesReadyToSave.clear();
 		this.phase = 'idle';
@@ -546,7 +548,9 @@ export class ConfigState {
 	/** 立即提交尚未触发的配置和凭据自动保存任务。 */
 	async flushPendingChanges(): Promise<void> {
 		Object.entries(this.pendingCredentialValues).forEach(([name, value]) => {
-			if (value) this.$credentialNamesReadyToSave.add(name);
+			if (!value) return;
+			this.$credentialNamesReadyToSave.add(name);
+			this.$savePending = true;
 		});
 		await this.flushAutoSave();
 	}
@@ -556,9 +560,13 @@ export class ConfigState {
 			clearTimeout(this.$saveTimer);
 			this.$saveTimer = undefined;
 		}
-		if (!this.isDirty || this.$disposed) return;
-		this.$saveRequested = true;
+		if (this.$disposed) return;
+		if (this.$savePending) {
+			this.$savePending = false;
+			if (this.isDirty) this.$saveRequested = true;
+		}
 		if (this.$savePromise) return this.$savePromise;
+		if (!this.$saveRequested) return;
 		const savePromise = this.runAutoSaveLoop();
 		this.$savePromise = savePromise;
 		try {
@@ -677,6 +685,7 @@ export class ConfigState {
 		if (this.$disposed) return;
 		if (this.$saveTimer) clearTimeout(this.$saveTimer);
 		this.clearOperationResult();
+		this.$savePending = true;
 		this.$saveTimer = setTimeout(() => {
 			this.$saveTimer = undefined;
 			void this.flushAutoSave();

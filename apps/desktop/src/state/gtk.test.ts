@@ -6,6 +6,7 @@ type SignalCallback = (...args: unknown[]) => unknown;
 
 class SignalTarget {
 	private $label = '';
+	private $text = '';
 	labelWriteCount = 0;
 	sensitive = true;
 	visible = true;
@@ -18,6 +19,15 @@ class SignalTarget {
 	set label(label: string) {
 		this.labelWriteCount += 1;
 		this.$label = label;
+	}
+
+	get text(): string {
+		return this.$text;
+	}
+
+	set text(text: string) {
+		this.$text = text;
+		this.emit('changed');
 	}
 
 	on(signal: string, callback: SignalCallback): this {
@@ -41,12 +51,18 @@ class SignalTarget {
 class ViewState {
 	@value label: string;
 	@value enabled = true;
+	@value inputCount = 0;
 
 	constructor(label: string) {
 		this.label = label;
 	}
 
 	@action updateLabel(label: string): void {
+		this.label = label;
+	}
+
+	@action updateFromEntry(label: string): void {
+		this.inputCount += 1;
 		this.label = label;
 	}
 
@@ -70,6 +86,9 @@ class TestView {
 		return state.label;
 	})
 	readonly stableLabel = new SignalTarget();
+	@bind.prop('text', (state) => state.label)
+	@bind.listen<SignalTarget>('changed', (state, target) => state.updateFromEntry(target.text))
+	readonly entry = new SignalTarget();
 	@bind.click((state) => state.toggle()) readonly button = new SignalTarget();
 }
 
@@ -81,16 +100,24 @@ describe('GTK state binding', () => {
 
 		view.state = firstState;
 		expect(view.label.label).toBe('first');
+		expect(view.entry.text).toBe('first');
+		expect(firstState.inputCount).toBe(0);
 		expect(view.label.sensitive).toBe(true);
 		expect(view.stableLabel.labelWriteCount).toBe(1);
 
 		firstState.updateLabel('updated');
 		expect(view.label.label).toBe('updated');
+		expect(view.entry.text).toBe('updated');
+		expect(firstState.inputCount).toBe(0);
 		expect(view.stableLabel.labelWriteCount).toBe(2);
+
+		view.entry.text = 'typed';
+		expect(firstState.label).toBe('typed');
+		expect(firstState.inputCount).toBe(1);
 
 		view.button.emit('clicked');
 		expect(view.label.sensitive).toBe(false);
-		expect(view.stableLabel.labelWriteCount).toBe(2);
+		expect(view.stableLabel.labelWriteCount).toBe(3);
 
 		view.state = secondState;
 		expect(view.label.label).toBe('second');

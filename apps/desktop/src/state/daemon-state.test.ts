@@ -69,4 +69,21 @@ describe('DaemonState', () => {
 		expect(client.connect).toHaveBeenCalledTimes(1);
 		expect(client.dispose).toHaveBeenCalledOnce();
 	});
+
+	it('describes missing configuration as a normal first-run state', async () => {
+		const client = new FakeDaemonClient();
+		client.connect.mockResolvedValue(initializeResult);
+		client.getStatus.mockResolvedValue({
+			...daemonStatus,
+			state: 'needs-configuration',
+			lastError: 'VoxSpell config does not exist: /tmp/config.yaml',
+		});
+		const state = new DaemonState(client);
+
+		state.start();
+		await vi.waitFor(() => expect(state.connectionPhase).toBe('connected'));
+		expect(state.statusTitle).toBe('需要完成配置');
+		expect(state.statusDescription).toBe('Daemon 已运行，等待补充识别服务配置。');
+		state.dispose();
+	});
 });

@@ -235,6 +235,8 @@ describe('ConfigState', () => {
 		await vi.waitFor(() => expect(state.config.draft).toBeDefined());
 		state.client.config = null;
 		await state.config.load();
+		state.client.validateConfig.mockClear();
+		state.client.updateConfig.mockClear();
 
 		expect(state.config.config).toBeUndefined();
 		expect(state.config.draft).toMatchObject({
@@ -242,6 +244,10 @@ describe('ConfigState', () => {
 		});
 		expect(state.config.requiredCredentialNames).toEqual(['OPENAI_API_KEY']);
 		expect(state.config.isDirty).toBe(true);
+		await state.config.flushPendingChanges();
+		expect(state.config.phase).toBe('idle');
+		expect(state.client.validateConfig).not.toHaveBeenCalled();
+		expect(state.client.updateConfig).not.toHaveBeenCalled();
 		disposeTestState(state);
 	});
 

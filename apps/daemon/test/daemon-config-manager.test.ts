@@ -1,10 +1,11 @@
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { describe, expect, it, vi } from 'vitest';
 
 import { createEmptyCredentials, saveVoxSpellCredentials } from '@voxspell/config/credentials';
+import { loadVoxSpellConfig } from '@voxspell/config/load-config';
 import { saveVoxSpellConfig } from '@voxspell/config/save-config';
 
 import { DaemonConfigManager } from '../src/configuration/daemon-config-manager.js';
@@ -41,17 +42,39 @@ async function createPaths(): Promise<VoxSpellConfigPaths> {
 }
 
 describe('DaemonConfigManager', () => {
-	it('starts without a config and retains a manageable state', async () => {
+	it('creates and loads a default config before startup completes', async () => {
 		const paths = await createPaths();
 		const manager = new DaemonConfigManager({ paths, environment: {} });
 
 		await expect(manager.initialize()).resolves.toBeUndefined();
 
 		expect(manager.getAsrProvider()).toBeUndefined();
+		expect(await loadVoxSpellConfig(paths.configFile)).toMatchObject({
+			asr: {
+				activeProvider: 'openai',
+				providers: [{ model: 'whisper-1' }],
+			},
+		});
+		expect(manager.getConfig()).toMatchObject({
+			asr: { activeProvider: 'openai' },
+		});
 		expect(manager.getStatus()).toMatchObject({
 			state: 'needs-configuration',
 			configPath: paths.configFile,
+			missingCredentialNames: ['OPENAI_API_KEY'],
 		});
+	});
+
+	it('does not overwrite an existing invalid config during startup', async () => {
+		const paths = await createPaths();
+		const source = 'invalid: [';
+		await writeFile(paths.configFile, source, 'utf8');
+		const manager = new DaemonConfigManager({ paths, environment: {} });
+
+		await expect(manager.initialize()).resolves.toBeUndefined();
+
+		expect(await readFile(paths.configFile, 'utf8')).toBe(source);
+		expect(manager.getStatus().state).toBe('degraded');
 	});
 
 	it('loads stored credentials and lets the process environment override them', async () => {
@@ -221,18 +244,18 @@ describe('DaemonConfigManager', () => {
 		expect(manager.getConfig()?.polishing?.systemPrompt).toBe('新提示词');
 	});
 
-	it('allows credentials to be prepared before the first config exists', async () => {
+	it('activates the startup default config when its credential is supplied', async () => {
 		const paths = await createPaths();
 		const manager = new DaemonConfigManager({ paths, environment: {} });
 		await manager.initialize();
 
 		await manager.updateCredentials({
 			version: 1,
-			values: { OPENROUTER_API_KEY: 'secret' },
+			values: { OPENAI_API_KEY: 'secret' },
 		});
 
 		expect(manager.getCredentials()).not.toEqual(createEmptyCredentials());
-		expect(manager.getStatus().state).toBe('needs-configuration');
+		expect(manager.getStatus().state).toBe('ready');
 	});
 
 	it('tests a selected provider without replacing the active runtime provider', async () => {
@@ -264,7 +287,10 @@ describe('DaemonConfigManager', () => {
 
 	it('serializes credential patches without losing concurrent updates', async () => {
 		const paths = await createPaths();
-		const manager = new DaemonConfigManager({ paths, environment: {} });
+		const manager = new DaemonConfigManager({
+			paths,
+			environment: { OPENAI_API_KEY: 'startup-secret' },
+		});
 		await manager.initialize();
 
 		await Promise.all([

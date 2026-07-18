@@ -56,6 +56,7 @@ export interface GtkBinding<TState, TSelf extends GtkViewInstance<TState>> {
 
 const gtkViewMembers = new WeakMap<object, GtkViewMember[]>();
 const gtkViewScopeKey = Symbol('gtkViewScope');
+const renderingTargets = new WeakSet<object>();
 
 /** 创建一组与状态和 GTK View 类型绑定的装饰器。 */
 export function gtk<
@@ -136,7 +137,12 @@ function prop<
 	return render((state: TState, target: TTarget, self: TSelf) => {
 		const next = getter(state, target, self);
 		if (Object.is(target[key], next)) return;
-		target[key] = next;
+		renderingTargets.add(target);
+		try {
+			target[key] = next;
+		} finally {
+			renderingTargets.delete(target);
+		}
 	});
 }
 
@@ -145,7 +151,10 @@ function listen<TState, TTarget extends GtkSignalTarget, TSelf extends object>(
 	handler: GtkViewHandler<TState, TTarget, TSelf>,
 ): PropertyDecorator {
 	return mount((state: TState, target: TTarget, self: TSelf) => {
-		const callback = () => handler(state, target, self);
+		const callback = () => {
+			if (renderingTargets.has(target)) return;
+			handler(state, target, self);
+		};
 		target.on(signal, callback);
 		return () => target.off(signal, callback);
 	});
