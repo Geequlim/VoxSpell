@@ -1,6 +1,7 @@
 {
 	"extends": "../../tsconfig.base.json",
 	"compilerOptions": {
+		"experimentalDecorators": true,
 		"rootDir": ".",
 		"paths": {
 			"node-gtk": ["./.cache/types/node-gtk.d.ts"]

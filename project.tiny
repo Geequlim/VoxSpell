@@ -2,7 +2,7 @@ develop:
   actions:
     - name: dev
       description: 启动 daemon 开发环境
-      command: yarn --cwd apps/daemon rspack build --env watch=true,run=true,debug=true
+      command: VOXSPELL_DETERMINISTIC=1 yarn --cwd apps/daemon rspack build --env watch=true,run=true,debug=true
       actions:
         - name: asr
           description: 使用 config.yaml 中的真实 ASR Provider 启动 daemon 开发环境
@@ -31,6 +31,11 @@ develop:
           command:
             - yarn tiny install-fcitx5-addon
             - VOXSPELL_ASR_PROVIDER=glm yarn tiny dev/asr
+    - name: desktop
+      description: 构建并启动 GTK 桌面配置应用
+      command:
+        - yarn tiny build/desktop
+        - yarn --cwd apps/desktop node --enable-source-maps dist/index.cjs
     - name: mock-daemon
       description: 启动供 C++ 扩展联调的延迟测试 daemon
       command: node native/fcitx5-addon/test/mock-daemon/mock-daemon.mjs
@@ -49,6 +54,7 @@ develop:
         - yarn --cwd packages/asr-openai-compatible vitest run
         - yarn --cwd packages/asr-tencent vitest run
         - yarn --cwd apps/daemon vitest run
+        - yarn --cwd apps/desktop vitest run
       actions:
         - name: fcitx5-addon
           description: 执行 Fcitx 5 C++ 扩展测试
@@ -90,6 +96,7 @@ develop:
         - yarn --cwd packages/asr-tencent tsc --noEmit
         - yarn --cwd packages/text-pipeline tsc --noEmit
         - yarn --cwd apps/daemon tsc --noEmit
+        - yarn --cwd apps/desktop tsc --noEmit
     - name: lint
       description: 使用 Oxlint 执行静态代码分析
       command: yarn oxlint -c oxlint.config.mts -f stylish apps packages
@@ -115,6 +122,11 @@ publish:
       description: 构建 daemon bundle
       command: yarn --cwd apps/daemon rspack build
       actions:
+        - name: desktop
+          description: 生成 GTK 类型并构建桌面应用
+          command:
+            - yarn --cwd apps/desktop node-gtk generate-types Gtk-4.0 Adw-1 --outdir .cache/types
+            - yarn --cwd apps/desktop rspack build
         - name: fcitx5-addon
           description: 构建 Fcitx 5 C++ 扩展
           command:

@@ -1,7 +1,29 @@
 import * as gi from 'node-gtk';
+import { DesktopState } from './desktop-state';
+import { gtk } from './state/gtk';
 
 const Adw = gi.require('Adw', '1');
 const Gio = gi.require('Gio', '2.0');
+
+const bind = gtk<DesktopState, OverviewView>();
+
+@bind.view
+class OverviewView {
+	declare state?: DesktopState;
+
+	@bind.disposeOnDestroy readonly window: InstanceType<typeof Adw.ApplicationWindow>;
+	@bind.prop('title', (state) => state.statusTitle)
+	@bind.prop('description', (state) => state.statusDescription)
+	readonly statusPage: InstanceType<typeof Adw.StatusPage>;
+
+	constructor(
+		window: InstanceType<typeof Adw.ApplicationWindow>,
+		statusPage: InstanceType<typeof Adw.StatusPage>,
+	) {
+		this.window = window;
+		this.statusPage = statusPage;
+	}
+}
 
 const application = new Adw.Application({
 	applicationId: 'io.github.geequlim.VoxSpell',
@@ -22,8 +44,8 @@ application.on('activate', () => {
 		}),
 	});
 	const statusPage = new Adw.StatusPage({
-		title: 'VoxSpell 已准备就绪',
-		description: 'GTK 配置应用已成功启动。Daemon 连接将在后续阶段接入。',
+		title: '',
+		description: '',
 		iconName: 'audio-input-microphone-symbolic',
 		vexpand: true,
 	});
@@ -39,6 +61,10 @@ application.on('activate', () => {
 		defaultHeight: 520,
 		title: 'VoxSpell',
 	});
+	const state = new DesktopState();
+	const view = new OverviewView(window, statusPage);
+	view.state = state;
+	state.markReady();
 	window.present();
 });
 

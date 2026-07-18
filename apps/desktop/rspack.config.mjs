@@ -26,8 +26,12 @@ export default {
 							jsc: {
 								parser: {
 									syntax: 'typescript',
+									decorators: true,
 								},
 								target: 'es2024',
+								transform: {
+									legacyDecorator: true,
+								},
 							},
 						},
 					},
