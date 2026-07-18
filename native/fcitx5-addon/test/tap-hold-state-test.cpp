@@ -95,6 +95,24 @@ void testRepeatedTrigger() {
 		TapHoldAction::Swallow);
 }
 
+void testFailureWaitsForTriggerRelease() {
+	auto phase = expectTransition(
+		TapHoldPhase::Active,
+		TapHoldEvent::SessionFailed,
+		TapHoldPhase::AwaitingRelease,
+		TapHoldAction::None);
+	phase = expectTransition(
+		phase,
+		TapHoldEvent::TriggerRepeated,
+		TapHoldPhase::AwaitingRelease,
+		TapHoldAction::Swallow);
+	expectTransition(
+		phase,
+		TapHoldEvent::TriggerReleased,
+		TapHoldPhase::Idle,
+		TapHoldAction::Swallow);
+}
+
 } // namespace
 
 int main() {
@@ -103,5 +121,6 @@ int main() {
 	testRollover();
 	testCancelAndReset();
 	testRepeatedTrigger();
+	testFailureWaitsForTriggerRelease();
 	return 0;
 }

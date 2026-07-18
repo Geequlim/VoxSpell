@@ -155,6 +155,11 @@ publish:
 
 tools:
   actions:
+    - name: clean
+      description: 清理所有 dist 目录和用户目录安装的 Fcitx C++ 扩展
+      command:
+        - node scripts/clean.mts
+        - fcitx5 -r -d
     - name: 文档
       description: 启动文档预览
       command: yarn tiny-docs -c docs/configs.yaml serve -o

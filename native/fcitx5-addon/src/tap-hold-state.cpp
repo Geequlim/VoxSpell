@@ -34,6 +34,8 @@ TapHoldTransition transitionTapHold(TapHoldPhase phase, TapHoldEvent event) {
 		case TapHoldEvent::OtherPressed:
 		case TapHoldEvent::Cancelled:
 			return {TapHoldPhase::AwaitingRelease, TapHoldAction::Cancel};
+		case TapHoldEvent::SessionFailed:
+			return {TapHoldPhase::AwaitingRelease, TapHoldAction::None};
 		case TapHoldEvent::Reset:
 			return {TapHoldPhase::Idle, TapHoldAction::Clear};
 		default:

@@ -16,6 +16,7 @@ enum class TapHoldEvent {
 	ThresholdElapsed,
 	OtherPressed,
 	Cancelled,
+	SessionFailed,
 	Reset,
 };
 

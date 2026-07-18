@@ -206,11 +206,6 @@ private:
 			return;
 		}
 
-		if (!keyEvent.isRelease() && state->showingError) {
-			state->showingError = false;
-			clearOwnPanel(inputContext);
-		}
-
 		const bool triggerRelease =
 			keyEvent.isRelease() && state->phase != TapHoldPhase::Idle &&
 			keyEvent.key().sym() == state->triggerKey.sym();
@@ -237,6 +232,11 @@ private:
 				TapHoldEvent::TriggerRepeated,
 				keyEvent.time());
 			return;
+		}
+
+		if (state->showingError) {
+			state->showingError = false;
+			clearOwnPanel(inputContext);
 		}
 
 		if (state->phase == TapHoldPhase::Pending) {
@@ -969,6 +969,9 @@ private:
 				<< " detail=" << presentation.diagnostic;
 		}
 		auto *state = inputContext->propertyFor(&stateFactory_);
+		const auto transition =
+			transitionTapHold(state->phase, TapHoldEvent::SessionFailed);
+		state->phase = transition.phase;
 		clearOwnPanel(inputContext);
 		voiceInputContext_.unwatch();
 		clearVoiceSessionState();
