@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import { AsrProviderConfigError, resolveAsrProvider } from '../src/asr-provider.js';
 import { VoxSpellConfigError, parseVoxSpellConfig } from '../src/load-config.js';
+import {
+	getTextPolisherCredentialNames,
+	resolveTextPolisherProvider,
+} from '../src/text-polisher-provider.js';
 
 const validConfig = {
 	version: 1,
@@ -86,5 +90,77 @@ describe('VoxSpell config', () => {
 			secretKey: 'secret-key',
 			engineModelType: '16k_zh_en',
 		});
+	});
+
+	it('resolves an enabled text polisher and its system prompt', () => {
+		const config = parseVoxSpellConfig({
+			...validConfig,
+			polishing: {
+				enabled: true,
+				activeProvider: 'openrouter-chat',
+				systemPrompt: '只返回润色文本。',
+				providers: [
+					{
+						id: 'openrouter-chat',
+						type: 'openai-compatible-chat',
+						baseUrl: 'https://openrouter.ai/api/v1',
+						apiKeyEnvironment: 'OPENROUTER_API_KEY',
+						model: 'example/chat',
+						timeoutMilliseconds: 30_000,
+					},
+				],
+			},
+		});
+
+		expect(resolveTextPolisherProvider(config, { OPENROUTER_API_KEY: 'secret' })).toEqual({
+			id: 'openrouter-chat',
+			type: 'openai-compatible-chat',
+			baseUrl: 'https://openrouter.ai/api/v1',
+			apiKey: 'secret',
+			model: 'example/chat',
+			systemPrompt: '只返回润色文本。',
+			timeoutMilliseconds: 30_000,
+		});
+		expect(getTextPolisherCredentialNames(config)).toEqual(['OPENROUTER_API_KEY']);
+	});
+
+	it('allows a disabled text polisher without providers or credentials', () => {
+		const config = parseVoxSpellConfig({
+			...validConfig,
+			polishing: {
+				enabled: false,
+				systemPrompt: '只返回润色文本。',
+				providers: [],
+			},
+		});
+
+		expect(resolveTextPolisherProvider(config, {})).toBeUndefined();
+		expect(getTextPolisherCredentialNames(config)).toEqual([]);
+	});
+
+	it('rejects enabled polishing without an active provider', () => {
+		expect(() =>
+			parseVoxSpellConfig({
+				...validConfig,
+				polishing: {
+					enabled: true,
+					systemPrompt: '只返回润色文本。',
+					providers: [],
+				},
+			}),
+		).toThrow(VoxSpellConfigError);
+	});
+
+	it('rejects an empty text polishing system prompt', () => {
+		expect(() =>
+			parseVoxSpellConfig({
+				...validConfig,
+				polishing: {
+					enabled: false,
+					systemPrompt: '   ',
+					providers: [],
+				},
+			}),
+		).toThrow(VoxSpellConfigError);
 	});
 });

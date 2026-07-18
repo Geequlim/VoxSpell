@@ -8,7 +8,7 @@ import { FakeTextPolisher } from './fakes/fake-text-polisher.js';
 
 import type { TextPolisher } from '@voxspell/ai-polisher/text-polisher';
 import type { TextPipeline } from '@voxspell/text-pipeline/text-pipeline';
-import type { DaemonSessionEvent } from '../src/session-coordinator.js';
+import type { DaemonSessionEvent, SessionCoordinatorOptions } from '../src/session-coordinator.js';
 
 const SESSION_ID = '0190c95b-7f28-7b12-8b6f-a4d3fd239013';
 const NEXT_SESSION_ID = '0190c95b-7f28-7b12-8b6f-a4d3fd239014';
@@ -24,6 +24,8 @@ interface TestContextOptions {
 	readonly sessionIds?: string[];
 	readonly textPipeline?: TextPipeline;
 	readonly textPolisher?: TextPolisher;
+	readonly getTextPolisher?: () => TextPolisher | undefined;
+	readonly getPolishDictionary?: SessionCoordinatorOptions['getPolishDictionary'];
 	readonly sessionGate?: DaemonSessionGate;
 }
 
@@ -38,6 +40,8 @@ function createTestContext(options: TestContextOptions = {}): TestContext {
 		asrProvider,
 		textPipeline: options.textPipeline,
 		textPolisher: options.textPolisher,
+		getTextPolisher: options.getTextPolisher,
+		getPolishDictionary: options.getPolishDictionary,
 		sessionGate: options.sessionGate,
 		publish: (event) => events.push(event),
 		createSessionId: () => {
@@ -152,17 +156,25 @@ describe('SessionCoordinator', () => {
 
 	it('publishes full polished snapshots and exposes both final results', async () => {
 		const polisher = new FakeTextPolisher();
+		const dictionary = [{ canonical: 'Codex', aliases: ['扣得克斯'] }];
 		const pipeline: TextPipeline = {
 			processTranscript: async (text) => `识别:${text}`,
-			processPolished: async (text) => `润色:${text}`,
+			processPolished: async (request) => {
+				expect(request.dictionary).toEqual(dictionary);
+				return `润色:${request.polished}`;
+			},
 		};
-		const context = createTestContext({ textPipeline: pipeline, textPolisher: polisher });
+		const context = createTestContext({
+			textPipeline: pipeline,
+			textPolisher: polisher,
+			getPolishDictionary: () => dictionary,
+		});
 		await context.coordinator.start('input-context-1');
 		await completeAsr(context, '原始输入');
 		await vi.waitFor(() => expect(context.coordinator.state).toBe('polishing'));
 		const polishSession = polisher.sessions[0];
 
-		expect(polishSession.input).toBe('识别:原始输入');
+		expect(polishSession.request).toEqual({ text: '识别:原始输入', dictionary });
 		polishSession.emit({ type: 'delta', text: '更自然' });
 		polishSession.emit({ type: 'delta', text: '的表达' });
 		polishSession.emit({ type: 'completed' });

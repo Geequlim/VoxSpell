@@ -2079,7 +2079,9 @@ __metadata:
   resolution: "@voxspell/ai-polisher@workspace:packages/ai-polisher"
   dependencies:
     "@types/node": "npm:24.13.3"
+    openai: "npm:6.47.0"
     typescript: "npm:7.0.2"
+    vitest: "npm:4.1.10"
   languageName: unknown
   linkType: soft
 
@@ -2192,7 +2194,9 @@ __metadata:
   resolution: "@voxspell/text-pipeline@workspace:packages/text-pipeline"
   dependencies:
     "@types/node": "npm:24.13.3"
+    "@voxspell/ai-polisher": "workspace:^"
     typescript: "npm:7.0.2"
+    vitest: "npm:4.1.10"
   languageName: unknown
   linkType: soft
 

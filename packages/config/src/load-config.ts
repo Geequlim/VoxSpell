@@ -52,7 +52,28 @@ export function parseVoxSpellConfig(value: unknown): VoxSpellConfig {
 			`Active ASR provider does not exist: ${config.asr.activeProvider}`,
 		);
 	}
+	if (config.polishing) validatePolishingConfig(config.polishing);
 	return config;
+}
+
+/** 校验润色配置中无法由 TypeBox 单独表达的引用关系。 */
+function validatePolishingConfig(config: NonNullable<VoxSpellConfig['polishing']>): void {
+	if (config.systemPrompt.trim().length === 0) {
+		throw new VoxSpellConfigError('Text polishing system prompt is empty');
+	}
+	const providerIds = new Set<string>();
+	for (const provider of config.providers) {
+		if (providerIds.has(provider.id)) {
+			throw new VoxSpellConfigError(
+				`Text polisher provider id is duplicated: ${provider.id}`,
+			);
+		}
+		providerIds.add(provider.id);
+	}
+	if (!config.enabled) return;
+	if (!config.activeProvider || !providerIds.has(config.activeProvider)) {
+		throw new VoxSpellConfigError('Active text polisher provider does not exist');
+	}
 }
 
 /** 从 YAML 文件加载并校验 VoxSpell 配置。 */

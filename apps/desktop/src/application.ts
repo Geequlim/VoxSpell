@@ -1,4 +1,5 @@
 import { DesktopState } from './desktop-state';
+import { FcitxInputBehaviorClient } from './fcitx/input-behavior-client';
 import { Adw, Gio } from './gtk';
 import { resolveDaemonSocketPath } from './rpc/daemon-socket-path';
 import { DaemonRpcClient } from './rpc/daemon-rpc-client';
@@ -19,7 +20,7 @@ export function runApplication(): number {
 		}
 
 		const client = new DaemonRpcClient({ socketPath: resolveDaemonSocketPath() });
-		const state = new DesktopState(client);
+		const state = new DesktopState(client, new FcitxInputBehaviorClient());
 		const window = createAppWindow(application, state);
 		window.once('destroy', () => state.dispose());
 		state.start();

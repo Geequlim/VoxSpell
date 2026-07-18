@@ -5,11 +5,17 @@
 	"type": "module",
 	"sideEffects": false,
 	"exports": {
+		"./openai-compatible-text-polisher": "./src/openai-compatible-text-polisher.ts",
+		"./polish-system-prompt": "./src/polish-system-prompt.ts",
 		"./text-polisher": "./src/text-polisher.ts"
+	},
+	"dependencies": {
+		"openai": "6.47.0"
 	},
 	"devDependencies": {
 		"@types/node": "24.13.3",
-		"typescript": "7.0.2"
+		"typescript": "7.0.2",
+		"vitest": "4.1.10"
 	},
 	"engines": {
 		"node": ">=24"

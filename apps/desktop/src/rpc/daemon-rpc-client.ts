@@ -22,6 +22,7 @@ import {
 	DaemonPingResultSchema,
 } from '@voxspell/protocol/daemon';
 import { InitializeRequest, InitializeResultSchema } from '@voxspell/protocol/initialize';
+import { ProviderTestRequest, ProviderTestResultSchema } from '@voxspell/protocol/provider';
 import { ProtocolValidationError, validateProtocolValue } from '@voxspell/protocol/validation';
 import {
 	StreamMessageReader,
@@ -38,10 +39,12 @@ import type {
 } from '@voxspell/protocol/credentials';
 import type { DaemonGetStatusResult, DaemonPingResult } from '@voxspell/protocol/daemon';
 import type { InitializeResult } from '@voxspell/protocol/initialize';
+import type { ProviderTestResult } from '@voxspell/protocol/provider';
 import type { MessageConnection } from 'vscode-jsonrpc/node';
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 2_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 3_000;
+const PROVIDER_TEST_TIMEOUT_MS = 20_000;
 
 export interface DaemonRpcClientOptions {
 	readonly socketPath: string;
@@ -194,6 +197,22 @@ export class DaemonRpcClient {
 		}
 	}
 
+	/** 测试 daemon 中已保存的指定 Provider。 */
+	async testProvider(providerId: string): Promise<ProviderTestResult> {
+		const connection = this.#requireConnection();
+		try {
+			const result = await this.#requestWithTimeout(
+				connection.sendRequest(ProviderTestRequest, { providerId }),
+				'provider.test',
+				PROVIDER_TEST_TIMEOUT_MS,
+			);
+			return validateProtocolValue(ProviderTestResultSchema, result);
+		} catch (error) {
+			this.#resetInvalidConnection(error);
+			throw error;
+		}
+	}
+
 	/** 监听已建立连接的意外断开。 */
 	onDidDisconnect(listener: () => void): () => void {
 		this.#disconnectListeners.add(listener);
@@ -282,11 +301,15 @@ export class DaemonRpcClient {
 		return this.#connection;
 	}
 
-	#requestWithTimeout<T>(request: Promise<T>, operation: string): Promise<T> {
+	#requestWithTimeout<T>(
+		request: Promise<T>,
+		operation: string,
+		timeoutMs = this.#requestTimeoutMs,
+	): Promise<T> {
 		return new Promise((resolve, reject) => {
 			const timeout = setTimeout(
 				() => reject(new DaemonRpcTimeoutError(operation)),
-				this.#requestTimeoutMs,
+				timeoutMs,
 			);
 			request.then(
 				(result) => {

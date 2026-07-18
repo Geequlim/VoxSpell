@@ -52,7 +52,9 @@ class FakeDesktopClient implements DaemonClient, ConfigClient {
 	});
 	updateCredentials = vi.fn(async (params: CredentialsUpdateParams) => {
 		this.storedNames.push(...params.set.map((entry) => entry.name));
+		this.storedNames = this.storedNames.filter((name) => !params.delete.includes(name));
 	});
+	testProvider = vi.fn(async () => ({ latencyMs: 12, partialResults: false }));
 	dispose = vi.fn();
 	disconnectListener?: () => void;
 
@@ -129,6 +131,42 @@ describe('ConfigState', () => {
 		disposeTestState(state);
 	});
 
+	it('creates and saves editable AI polishing configuration', async () => {
+		const state = createTestState();
+		await vi.waitFor(() => expect(state.config.draft).toBeDefined());
+
+		state.config.updatePolishingEnabled(true);
+		state.config.updatePolishingBaseUrl('https://openrouter.ai/api/v1');
+		state.config.updatePolishingModel('example/chat');
+		state.config.updatePolishingApiKeyEnvironment('CHAT_API_KEY');
+		state.config.updatePolishingCredential('chat-secret');
+		state.config.updatePolishingSystemPrompt('只返回润色后的正文。');
+		await state.config.save();
+
+		expect(state.client.updateCredentials).toHaveBeenCalledWith({
+			set: [{ name: 'CHAT_API_KEY', value: 'chat-secret' }],
+			delete: [],
+		});
+		expect(state.client.updateConfig).toHaveBeenCalledWith(
+			expect.objectContaining({
+				polishing: {
+					enabled: true,
+					activeProvider: 'openai',
+					systemPrompt: '只返回润色后的正文。',
+					providers: [
+						expect.objectContaining({
+							type: 'openai-compatible-chat',
+							model: 'example/chat',
+							apiKeyEnvironment: 'CHAT_API_KEY',
+						}),
+					],
+				},
+			}),
+		);
+		expect(state.config.phase).toBe('saved');
+		disposeTestState(state);
+	});
+
 	it('rejects invalid form fields before calling daemon validation', async () => {
 		const state = createTestState();
 		await vi.waitFor(() => expect(state.config.draft).toBeDefined());
@@ -138,7 +176,24 @@ describe('ConfigState', () => {
 
 		expect(state.config.phase).toBe('error');
 		expect(state.config.fieldErrors.baseUrl).toContain('HTTP');
+		expect(state.config.operationTitle).toBe('配置有 1 项需要修正');
+		expect(state.config.operationDescription).toContain('语音识别 API 地址');
 		expect(state.client.validateConfig).not.toHaveBeenCalled();
+		expect(state.client.updateConfig).not.toHaveBeenCalled();
+		disposeTestState(state);
+	});
+
+	it('describes every invalid AI polishing field before saving', async () => {
+		const state = createTestState();
+		await vi.waitFor(() => expect(state.config.draft).toBeDefined());
+		state.config.updatePolishingEnabled(true);
+		state.config.updatePolishingBaseUrl('invalid');
+
+		await state.config.save();
+
+		expect(state.config.operationTitle).toBe('配置有 2 项需要修正');
+		expect(state.config.operationDescription).toContain('AI 润色 API 地址');
+		expect(state.config.operationDescription).toContain('AI 润色模型');
 		expect(state.client.updateConfig).not.toHaveBeenCalled();
 		disposeTestState(state);
 	});
@@ -155,6 +210,41 @@ describe('ConfigState', () => {
 		});
 		expect(state.config.requiredCredentialNames).toEqual(['OPENAI_API_KEY']);
 		expect(state.config.isDirty).toBe(true);
+		disposeTestState(state);
+	});
+
+	it('adds and removes typed providers without deleting stored credentials', async () => {
+		const state = createTestState();
+		await vi.waitFor(() => expect(state.config.draft).toBeDefined());
+		state.config.updateNewProviderId('backup');
+		state.config.addProvider();
+
+		expect(state.config.activeProvider).toMatchObject({
+			id: 'backup',
+			type: 'openai-compatible-transcription',
+			apiKeyEnvironment: 'VOXSPELL_BACKUP_API_KEY',
+		});
+		expect(state.config.canDeleteProvider).toBe(true);
+		state.config.deleteActiveProvider();
+		expect(state.config.providerIds).toEqual(['openrouter']);
+		disposeTestState(state);
+	});
+
+	it('deletes stored credentials and tests only a saved provider', async () => {
+		const state = createTestState();
+		state.client.storedNames = ['OPENROUTER_API_KEY'];
+		await vi.waitFor(() => expect(state.config.selectedCredentialName).toBeDefined());
+		await state.config.load();
+
+		expect(state.config.canDeleteCredential).toBe(true);
+		await state.config.deleteSelectedCredential();
+		expect(state.client.updateCredentials).toHaveBeenCalledWith({
+			set: [],
+			delete: ['OPENROUTER_API_KEY'],
+		});
+		await state.config.testProvider();
+		expect(state.client.testProvider).toHaveBeenCalledWith('openrouter');
+		expect(state.config.operationDescription).toContain('12 ms');
 		disposeTestState(state);
 	});
 });

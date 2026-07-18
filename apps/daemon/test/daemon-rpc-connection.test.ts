@@ -17,6 +17,7 @@ import {
 import { FcitxGetConfigRequest, FcitxUpdateConfigRequest } from '@voxspell/protocol/fcitx';
 import { DAEMON_ERROR_CODE } from '@voxspell/protocol/errors';
 import { InitializeRequest } from '@voxspell/protocol/initialize';
+import { ProviderTestRequest } from '@voxspell/protocol/provider';
 import {
 	SessionCancelRequest,
 	SessionCompletedNotification,
@@ -32,6 +33,7 @@ import { ErrorCodes } from 'vscode-jsonrpc/node';
 import { VoxSpellConfigError } from '@voxspell/config/load-config';
 
 import { DaemonRpcConnection } from '../src/rpc/daemon-rpc-connection.js';
+import { AsrProviderTestError } from '../src/asr/test-asr-provider.js';
 import { SessionCoordinator } from '../src/session-coordinator.js';
 import { FakeAudioCaptureBackend } from './fakes/fake-audio-capture.js';
 import { createInMemoryRpcPair } from './fakes/in-memory-rpc.js';
@@ -82,6 +84,7 @@ interface RpcTestContext {
 	readonly validateConfig: ReturnType<typeof vi.fn>;
 	readonly updateConfig: ReturnType<typeof vi.fn>;
 	readonly updateCredentialEntries: ReturnType<typeof vi.fn>;
+	readonly testProvider: ReturnType<typeof vi.fn>;
 	readonly updateFcitxConfig: ReturnType<typeof vi.fn>;
 }
 
@@ -102,6 +105,7 @@ function createTestContext(options: TestContextOptions = { fragmentSize: 3 }): R
 	const validateConfig = vi.fn(async () => undefined);
 	const updateConfig = vi.fn(async () => undefined);
 	const updateCredentialEntries = vi.fn(async () => undefined);
+	const testProvider = vi.fn(async () => ({ latencyMs: 25, partialResults: false }));
 	const updateFcitxConfig = vi.fn(async () => undefined);
 	const configuration = {
 		getStatus: () => ({
@@ -116,6 +120,7 @@ function createTestContext(options: TestContextOptions = { fragmentSize: 3 }): R
 		reload: reloadConfig,
 		getStoredCredentialNames: () => [],
 		updateCredentialEntries,
+		testProvider,
 	};
 	const server = new DaemonRpcConnection({
 		connection: pair.server,
@@ -172,6 +177,7 @@ function createTestContext(options: TestContextOptions = { fragmentSize: 3 }): R
 		validateConfig,
 		updateConfig,
 		updateCredentialEntries,
+		testProvider,
 		updateFcitxConfig,
 	};
 	contexts.push(context);
@@ -298,6 +304,9 @@ describe('DaemonRpcConnection', () => {
 				delete: [],
 			}),
 		).resolves.toBeNull();
+		await expect(
+			context.pair.client.sendRequest(ProviderTestRequest, { providerId: 'openrouter' }),
+		).resolves.toEqual({ latencyMs: 25, partialResults: false });
 		await expect(context.pair.client.sendRequest(DaemonGetStatusRequest, {})).resolves.toEqual({
 			state: 'ready',
 			configPath: '/tmp/voxspell/config.yaml',
@@ -321,6 +330,7 @@ describe('DaemonRpcConnection', () => {
 			[{ name: 'OPENROUTER_API_KEY', value: 'secret' }],
 			[],
 		);
+		expect(context.testProvider).toHaveBeenCalledWith('openrouter');
 		expect(context.updateFcitxConfig).toHaveBeenCalledOnce();
 	});
 
@@ -340,6 +350,27 @@ describe('DaemonRpcConnection', () => {
 			code: DAEMON_ERROR_CODE,
 			message: 'Configuration operation failed',
 			data: { code: 'CONFIG_INVALID', stage: 'config', retryable: false },
+		});
+	});
+
+	it('maps provider test failures to a stable structured error', async () => {
+		const context = createTestContext();
+		await initialize(context);
+		context.testProvider.mockRejectedValueOnce(
+			new AsrProviderTestError('AUTHENTICATION_FAILED', false),
+		);
+
+		await expect(
+			context.pair.client.sendRequest(ProviderTestRequest, { providerId: 'openrouter' }),
+		).rejects.toMatchObject({
+			code: DAEMON_ERROR_CODE,
+			message: 'Provider test failed',
+			data: {
+				code: 'PROVIDER_TEST_FAILED',
+				stage: 'asr',
+				retryable: false,
+				providerCode: 'AUTHENTICATION_FAILED',
+			},
 		});
 	});
 

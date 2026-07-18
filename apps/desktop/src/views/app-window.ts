@@ -14,11 +14,11 @@ import type { PageId } from '../pages/page-definition';
 const bind = gtk<DesktopState, AppWindowView>();
 
 const createPage = {
-	overview: (state: DesktopState) => createOverviewPage(state.daemon),
+	overview: (state: DesktopState) => createOverviewPage(state),
 	recognition: (state: DesktopState) => createRecognitionPage(state.config),
-	'input-behavior': () => createInputBehaviorPage(),
-	'text-processing': () => createTextProcessingPage(),
-	diagnostics: () => createDiagnosticsPage(),
+	'input-behavior': (state: DesktopState) => createInputBehaviorPage(state.inputBehavior),
+	'text-processing': (state: DesktopState) => createTextProcessingPage(state.config),
+	diagnostics: (state: DesktopState) => createDiagnosticsPage(state.daemon),
 	about: () => createAboutPage(),
 } satisfies Record<PageId, (state: DesktopState) => InstanceType<typeof Gtk.Widget>>;
 
@@ -35,6 +35,12 @@ class AppWindowView {
 		(state) => pageDefinitions.find((page) => page.id === state.currentPage)?.title ?? '',
 	)
 	readonly contentTitle: InstanceType<typeof Adw.WindowTitle>;
+	@bind.render<InstanceType<typeof Gtk.ListBox>>((state, list, self) => {
+		const selectedRow = list.getSelectedRow();
+		if (selectedRow && self.pageByRow.get(selectedRow) === state.currentPage) return;
+		const target = [...self.pageByRow].find(([, page]) => page === state.currentPage)?.[0];
+		if (target) list.selectRow(target);
+	})
 	@bind.listen<InstanceType<typeof Gtk.ListBox>>('row-selected', (state, list, self) => {
 		const row = list.getSelectedRow();
 		const page = row ? self.pageByRow.get(row) : undefined;

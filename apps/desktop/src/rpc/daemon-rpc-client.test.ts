@@ -106,6 +106,7 @@ describe('DaemonRpcClient', () => {
 				updatedCredentials.push(params);
 				return null;
 			});
+			connection.onRequest('provider.test', () => ({ latencyMs: 18, partialResults: false }));
 		});
 		const client = new DaemonRpcClient({ socketPath: testServer.socketPath });
 
@@ -130,6 +131,10 @@ describe('DaemonRpcClient', () => {
 		).resolves.toBeUndefined();
 		expect(updatedConfigs).toHaveLength(1);
 		expect(updatedCredentials).toHaveLength(1);
+		await expect(client.testProvider('test')).resolves.toEqual({
+			latencyMs: 18,
+			partialResults: false,
+		});
 		client.dispose();
 	});
 

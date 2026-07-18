@@ -1,25 +1,25 @@
 import { AsyncQueue } from './async-queue.js';
 
-import type { PolishEvent, TextPolisher } from '@voxspell/ai-polisher/text-polisher';
+import type { PolishEvent, PolishRequest, TextPolisher } from '@voxspell/ai-polisher/text-polisher';
 
 export class FakeTextPolisher implements TextPolisher {
 	readonly id = 'fake-polisher';
 	readonly sessions: FakeTextPolishSession[] = [];
 
-	polish(text: string, signal: AbortSignal): AsyncIterable<PolishEvent> {
-		const session = new FakeTextPolishSession(text, signal);
+	polish(request: PolishRequest, signal: AbortSignal): AsyncIterable<PolishEvent> {
+		const session = new FakeTextPolishSession(request, signal);
 		this.sessions.push(session);
 		return session.events();
 	}
 }
 
 export class FakeTextPolishSession {
-	readonly input: string;
+	readonly request: PolishRequest;
 	readonly #events = new AsyncQueue<PolishEvent>();
 	aborted = false;
 
-	constructor(input: string, signal: AbortSignal) {
-		this.input = input;
+	constructor(request: PolishRequest, signal: AbortSignal) {
+		this.request = request;
 		if (signal.aborted) {
 			this.aborted = true;
 			this.#events.close();

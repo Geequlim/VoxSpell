@@ -13,6 +13,7 @@
 		"./errors": "./src/errors.ts",
 		"./fcitx": "./src/fcitx.ts",
 		"./initialize": "./src/initialize.ts",
+		"./provider": "./src/provider.ts",
 		"./session": "./src/session.ts",
 		"./validation": "./src/validation.ts"
 	},

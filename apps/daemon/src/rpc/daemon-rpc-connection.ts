@@ -62,6 +62,11 @@ import {
 	SessionStartResultSchema,
 } from '@voxspell/protocol/session';
 import { ProtocolValidationError, validateProtocolValue } from '@voxspell/protocol/validation';
+import {
+	ProviderTestParamsSchema,
+	ProviderTestRequest,
+	ProviderTestResultSchema,
+} from '@voxspell/protocol/provider';
 import { ErrorCodes, ResponseError } from 'vscode-jsonrpc/node';
 import {
 	FcitxGetConfigParamsSchema,
@@ -77,6 +82,7 @@ import { AsrProviderConfigError } from '@voxspell/config/asr-provider';
 import { VoxSpellCredentialsError } from '@voxspell/config/credentials';
 import { VoxSpellConfigError, VoxSpellConfigNotFoundError } from '@voxspell/config/load-config';
 import { FcitxUnavailableError } from '../fcitx/fcitx-config-client.js';
+import { AsrProviderTestError } from '../asr/test-asr-provider.js';
 
 import type { ServerCapabilities } from '@voxspell/protocol/capabilities';
 import type { ServiceInfo } from '@voxspell/protocol/common';
@@ -87,6 +93,7 @@ import type { DaemonGetStatusResult } from '@voxspell/protocol/daemon';
 import type { VoxSpellFcitxConfig } from '@voxspell/protocol/fcitx';
 import type { DaemonSessionEvent, SessionCoordinator } from '../session-coordinator.js';
 import type { MessageConnection } from 'vscode-jsonrpc/node';
+import type { ProviderTestResult } from '@voxspell/protocol/provider';
 
 export interface DaemonRpcConnectionOptions {
 	readonly connection: MessageConnection;
@@ -118,6 +125,7 @@ export interface DaemonConfigurationRpcService {
 		set: readonly CredentialValueUpdate[],
 		deletedNames: readonly string[],
 	): Promise<void>;
+	testProvider(providerId: string): Promise<ProviderTestResult>;
 }
 
 /** 将 TypeBox 入站校验失败转换为不回显原始参数的 JSON-RPC 错误。 */
@@ -350,6 +358,29 @@ export class DaemonRpcConnection {
 			return validateOutbound(() =>
 				validateProtocolValue(CredentialsUpdateResultSchema, null),
 			);
+		});
+
+		this.#connection.onRequest(ProviderTestRequest, async (rawParams) => {
+			this.#ensureInitialized();
+			const params = validateInbound(() =>
+				validateProtocolValue(ProviderTestParamsSchema, rawParams),
+			);
+			try {
+				const result = await this.#configuration.testProvider(params.providerId);
+				return validateOutbound(() =>
+					validateProtocolValue(ProviderTestResultSchema, result),
+				);
+			} catch (error) {
+				if (error instanceof AsrProviderTestError) {
+					throw new ResponseError(DAEMON_ERROR_CODE, 'Provider test failed', {
+						code: 'PROVIDER_TEST_FAILED',
+						stage: 'asr',
+						retryable: error.retryable,
+						providerCode: error.providerCode,
+					});
+				}
+				throw this.#createConfigurationError(error);
+			}
 		});
 
 		this.#connection.onRequest(DaemonGetStatusRequest, (rawParams) => {

@@ -50,9 +50,11 @@ develop:
       command:
         - yarn --cwd packages/protocol vitest run
         - yarn --cwd packages/asr-core vitest run
+        - yarn --cwd packages/ai-polisher vitest run
         - yarn --cwd packages/config vitest run
         - yarn --cwd packages/asr-openai-compatible vitest run
         - yarn --cwd packages/asr-tencent vitest run
+        - yarn --cwd packages/text-pipeline vitest run
         - yarn --cwd apps/daemon vitest run
         - yarn --cwd apps/desktop vitest run
       actions:

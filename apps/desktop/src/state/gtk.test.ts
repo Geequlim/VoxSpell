@@ -5,10 +5,20 @@ import { gtk } from './gtk';
 type SignalCallback = (...args: unknown[]) => unknown;
 
 class SignalTarget {
-	label = '';
+	private $label = '';
+	labelWriteCount = 0;
 	sensitive = true;
 	visible = true;
 	private readonly $listeners = new Map<string, Set<SignalCallback>>();
+
+	get label(): string {
+		return this.$label;
+	}
+
+	set label(label: string) {
+		this.labelWriteCount += 1;
+		this.$label = label;
+	}
 
 	on(signal: string, callback: SignalCallback): this {
 		const listeners = this.$listeners.get(signal) || new Set();
@@ -55,6 +65,11 @@ class TestView {
 	@bind.label((state) => state.label)
 	@bind.sensitive((state) => state.enabled)
 	readonly label = new SignalTarget();
+	@bind.label((state) => {
+		void state.enabled;
+		return state.label;
+	})
+	readonly stableLabel = new SignalTarget();
 	@bind.click((state) => state.toggle()) readonly button = new SignalTarget();
 }
 
@@ -67,12 +82,15 @@ describe('GTK state binding', () => {
 		view.state = firstState;
 		expect(view.label.label).toBe('first');
 		expect(view.label.sensitive).toBe(true);
+		expect(view.stableLabel.labelWriteCount).toBe(1);
 
 		firstState.updateLabel('updated');
 		expect(view.label.label).toBe('updated');
+		expect(view.stableLabel.labelWriteCount).toBe(2);
 
 		view.button.emit('clicked');
 		expect(view.label.sensitive).toBe(false);
+		expect(view.stableLabel.labelWriteCount).toBe(2);
 
 		view.state = secondState;
 		expect(view.label.label).toBe('second');

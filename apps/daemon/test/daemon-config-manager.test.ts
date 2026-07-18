@@ -9,6 +9,7 @@ import { saveVoxSpellConfig } from '@voxspell/config/save-config';
 
 import { DaemonConfigManager } from '../src/configuration/daemon-config-manager.js';
 import { FakeRealtimeAsrProvider } from './fakes/fake-realtime-asr.js';
+import { FakeTextPolisher } from './fakes/fake-text-polisher.js';
 
 import type { VoxSpellConfigPaths } from '@voxspell/config/config-paths';
 import type { VoxSpellConfig } from '@voxspell/config/config-schema';
@@ -145,6 +146,46 @@ describe('DaemonConfigManager', () => {
 		});
 	});
 
+	it('atomically rebuilds the enabled text polisher from updated configuration', async () => {
+		const paths = await createPaths();
+		const polishingConfig: VoxSpellConfig = {
+			...validConfig,
+			polishing: {
+				enabled: true,
+				activeProvider: 'chat',
+				systemPrompt: '旧提示词',
+				providers: [
+					{
+						id: 'chat',
+						type: 'openai-compatible-chat',
+						baseUrl: 'https://openrouter.ai/api/v1',
+						apiKeyEnvironment: 'CHAT_API_KEY',
+						model: 'example/chat',
+					},
+				],
+			},
+		};
+		await saveVoxSpellConfig(paths.directory, paths.configFile, polishingConfig);
+		const polishers = [new FakeTextPolisher(), new FakeTextPolisher()];
+		const createTextPolisher = vi.fn(() => polishers.shift());
+		const manager = new DaemonConfigManager({
+			paths,
+			environment: { OPENROUTER_API_KEY: 'asr-secret', CHAT_API_KEY: 'chat-secret' },
+			createProvider: () => new FakeRealtimeAsrProvider(),
+			createTextPolisher,
+		});
+		await manager.initialize();
+		const previousPolisher = manager.getTextPolisher();
+
+		const updatedConfig = structuredClone(polishingConfig);
+		updatedConfig.polishing!.systemPrompt = '新提示词';
+		await manager.updateConfig(updatedConfig);
+
+		expect(createTextPolisher).toHaveBeenCalledTimes(2);
+		expect(manager.getTextPolisher()).not.toBe(previousPolisher);
+		expect(manager.getConfig()?.polishing?.systemPrompt).toBe('新提示词');
+	});
+
 	it('allows credentials to be prepared before the first config exists', async () => {
 		const paths = await createPaths();
 		const manager = new DaemonConfigManager({ paths, environment: {} });
@@ -157,6 +198,33 @@ describe('DaemonConfigManager', () => {
 
 		expect(manager.getCredentials()).not.toEqual(createEmptyCredentials());
 		expect(manager.getStatus().state).toBe('needs-configuration');
+	});
+
+	it('tests a selected provider without replacing the active runtime provider', async () => {
+		const paths = await createPaths();
+		await saveVoxSpellConfig(paths.directory, paths.configFile, validConfig);
+		const activeProvider = new FakeRealtimeAsrProvider();
+		const testedProvider = new FakeRealtimeAsrProvider();
+		const createProvider = vi.fn(
+			(_config: VoxSpellConfig, _environment: NodeJS.ProcessEnv, providerId?: string) =>
+				providerId ? testedProvider : activeProvider,
+		);
+		const manager = new DaemonConfigManager({
+			paths,
+			environment: { OPENROUTER_API_KEY: 'secret' },
+			createProvider,
+		});
+		await manager.initialize();
+
+		await expect(manager.testProvider('openrouter')).resolves.toMatchObject({
+			partialResults: true,
+		});
+		expect(createProvider).toHaveBeenLastCalledWith(
+			validConfig,
+			expect.objectContaining({ OPENROUTER_API_KEY: 'secret' }),
+			'openrouter',
+		);
+		expect(manager.getAsrProvider()).toBe(activeProvider);
 	});
 
 	it('serializes credential patches without losing concurrent updates', async () => {

@@ -10,6 +10,7 @@ import { ConfigGetRequest, ConfigUpdateRequest, ConfigValidateRequest } from '..
 import { CredentialsGetStatusRequest, CredentialsUpdateRequest } from '../src/credentials.js';
 import { FcitxGetConfigRequest, FcitxUpdateConfigRequest } from '../src/fcitx.js';
 import { InitializeRequest } from '../src/initialize.js';
+import { ProviderTestRequest } from '../src/provider.js';
 import {
 	SessionCancelRequest,
 	SessionCompletedNotification,
@@ -35,6 +36,7 @@ describe('JSON-RPC method descriptors', () => {
 		[ConfigUpdateRequest, 'config.update'],
 		[CredentialsGetStatusRequest, 'credentials.getStatus'],
 		[CredentialsUpdateRequest, 'credentials.update'],
+		[ProviderTestRequest, 'provider.test'],
 		[FcitxGetConfigRequest, 'fcitx.getConfig'],
 		[FcitxUpdateConfigRequest, 'fcitx.updateConfig'],
 		[DaemonGetStatusRequest, 'daemon.getStatus'],

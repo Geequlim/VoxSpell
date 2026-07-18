@@ -10,7 +10,9 @@
 		"./config-schema": "./src/config-schema.ts",
 		"./credentials": "./src/credentials.ts",
 		"./load-config": "./src/load-config.ts",
-		"./save-config": "./src/save-config.ts"
+		"./save-config": "./src/save-config.ts",
+		"./text-polisher-provider": "./src/text-polisher-provider.ts",
+		"./text-polishing-defaults": "./src/text-polishing-defaults.ts"
 	},
 	"dependencies": {
 		"@sinclair/typebox": "0.34.52",

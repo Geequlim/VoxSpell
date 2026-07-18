@@ -20,6 +20,7 @@ export const ProtocolErrorCodeSchema = Type.Union([
 	Type.Literal('CONFIG_APPLY_FAILED'),
 	Type.Literal('CREDENTIAL_MISSING'),
 	Type.Literal('CREDENTIAL_STORE_INVALID'),
+	Type.Literal('PROVIDER_TEST_FAILED'),
 	Type.Literal('FCITX_UNAVAILABLE'),
 	Type.Literal('FCITX_CONFIG_FAILED'),
 ]);

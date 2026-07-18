@@ -134,7 +134,9 @@ function prop<
 	TSelf extends object,
 >(key: TKey, getter: GtkViewGetter<TState, TTarget, TTarget[TKey], TSelf>): PropertyDecorator {
 	return render((state: TState, target: TTarget, self: TSelf) => {
-		target[key] = getter(state, target, self);
+		const next = getter(state, target, self);
+		if (Object.is(target[key], next)) return;
+		target[key] = next;
 	});
 }
 

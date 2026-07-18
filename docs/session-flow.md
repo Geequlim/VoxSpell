@@ -51,6 +51,8 @@ AI 润色期间使用 `session.results` 推送完整结果快照：
 
 daemon 在内部累积 AI 流式输出，每次发送完整的 `polished.text`。客户端只替换对应内容，不拼接 SSE delta。润色失败或结果校验失败时，`polished` 不可选，推荐结果回退为 `transcript`。
 
+AI 请求由 daemon 组合为系统提示词和用户消息。用户消息仅包含确定性处理后的 `transcript`；系统提示词由用户配置的基础提示词与程序生成的用户词典区块组成。daemon 只消费模型流中的正文内容，忽略 reasoning/thinking 字段。每次会话固定使用进入润色时的配置与词典快照。
+
 ## 3. 客户端展示策略
 
 是否自动提交由客户端配置决定，daemon 始终提供识别结果和润色结果。

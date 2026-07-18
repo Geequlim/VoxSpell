@@ -38,6 +38,7 @@ export interface DaemonRuntimeOptions {
 	readonly fcitx?: FcitxConfigurationRpcService;
 	readonly textPipeline?: TextPipeline;
 	readonly textPolisher?: TextPolisher;
+	readonly getTextPolisher?: () => TextPolisher | undefined;
 	readonly maximumContentLength?: number;
 	readonly onError?: (error: Error) => void;
 }
@@ -74,7 +75,7 @@ export class DaemonRuntime {
 			options.configuration ?? this.#createFallbackConfiguration(reloadConfig);
 		const fcitx = options.fcitx ?? this.#createFallbackFcitxConfiguration();
 		const textPipeline = options.textPipeline;
-		const textPolisher = options.textPolisher;
+		const getTextPolisher = options.getTextPolisher ?? (() => options.textPolisher);
 		const maximumContentLength = options.maximumContentLength ?? DEFAULT_MAX_CONTENT_LENGTH;
 		const onError = options.onError ?? (() => undefined);
 
@@ -87,7 +88,7 @@ export class DaemonRuntime {
 					captureBackend,
 					getAsrProvider,
 					textPipeline,
-					textPolisher,
+					getTextPolisher,
 					this.#sessionGate,
 					maximumContentLength,
 					configuration,
@@ -116,7 +117,7 @@ export class DaemonRuntime {
 		captureBackend: AudioCaptureBackend,
 		getAsrProvider: () => RealtimeAsrProvider | undefined,
 		textPipeline: TextPipeline | undefined,
-		textPolisher: TextPolisher | undefined,
+		getTextPolisher: () => TextPolisher | undefined,
 		sessionGate: DaemonSessionGate,
 		maximumContentLength: number,
 		configuration: DaemonConfigurationRpcService,
@@ -134,7 +135,7 @@ export class DaemonRuntime {
 			serverInfo: { name: 'voxspell-daemon', version: '0.0.0' },
 			capabilities: {
 				partialTranscript: getAsrProvider()?.capabilities.partialResults ?? false,
-				polishPreview: textPolisher !== undefined,
+				polishPreview: getTextPolisher() !== undefined,
 			},
 			configuration,
 			fcitx,
@@ -143,7 +144,7 @@ export class DaemonRuntime {
 					captureBackend,
 					getAsrProvider,
 					textPipeline,
-					textPolisher,
+					getTextPolisher,
 					sessionGate,
 					publish,
 				}),
@@ -181,6 +182,7 @@ export class DaemonRuntime {
 			reload,
 			getStoredCredentialNames: () => [],
 			updateCredentialEntries: async () => undefined,
+			testProvider: async () => ({ latencyMs: 0, partialResults: false }),
 		};
 	}
 

@@ -13,14 +13,19 @@ import {
 	VoxSpellConfigNotFoundError,
 } from '@voxspell/config/load-config';
 import { saveVoxSpellConfig } from '@voxspell/config/save-config';
+import { getTextPolisherCredentialNames } from '@voxspell/config/text-polisher-provider';
 
+import { createTextPolisher } from '../ai/create-configured-text-polisher.js';
 import { createAsrProvider } from '../asr/create-configured-asr-provider.js';
+import { testAsrProvider } from '../asr/test-asr-provider.js';
 
+import type { TextPolisher } from '@voxspell/ai-polisher/text-polisher';
 import type { RealtimeAsrProvider } from '@voxspell/asr-core/realtime-asr';
 import type { VoxSpellConfigPaths } from '@voxspell/config/config-paths';
 import type { VoxSpellConfig } from '@voxspell/config/config-schema';
 import type { VoxSpellCredentials } from '@voxspell/config/credentials';
 import type { CredentialValueUpdate } from '@voxspell/protocol/credentials';
+import type { ProviderTestResult } from '@voxspell/protocol/provider';
 
 export type DaemonConfigurationState = 'needs-configuration' | 'ready' | 'degraded';
 
@@ -40,7 +45,17 @@ export interface DaemonConfigManagerOptions {
 	readonly createProvider?: (
 		config: VoxSpellConfig,
 		environment: NodeJS.ProcessEnv,
+		providerId?: string,
 	) => RealtimeAsrProvider;
+	readonly createTextPolisher?: (
+		config: VoxSpellConfig,
+		environment: NodeJS.ProcessEnv,
+	) => TextPolisher | undefined;
+}
+
+interface RuntimeProviderSnapshot {
+	readonly asrProvider: RealtimeAsrProvider;
+	readonly textPolisher?: TextPolisher;
 }
 
 /** 串行管理 daemon 配置、凭据和当前运行时 Provider。 */
@@ -50,11 +65,17 @@ export class DaemonConfigManager {
 	readonly #createProvider: (
 		config: VoxSpellConfig,
 		environment: NodeJS.ProcessEnv,
+		providerId?: string,
 	) => RealtimeAsrProvider;
+	readonly #createTextPolisher: (
+		config: VoxSpellConfig,
+		environment: NodeJS.ProcessEnv,
+	) => TextPolisher | undefined;
 	#state: DaemonConfigurationState = 'needs-configuration';
 	#config?: VoxSpellConfig;
 	#credentials: VoxSpellCredentials = createEmptyCredentials();
 	#asrProvider?: RealtimeAsrProvider;
+	#textPolisher?: TextPolisher;
 	#lastError?: string;
 	#operation = Promise.resolve();
 
@@ -62,6 +83,7 @@ export class DaemonConfigManager {
 		this.#paths = options.paths;
 		this.#environment = options.environment ?? process.env;
 		this.#createProvider = options.createProvider ?? createAsrProvider;
+		this.#createTextPolisher = options.createTextPolisher ?? createTextPolisher;
 	}
 
 	/** 首次加载配置，失败时保留可管理的 daemon 状态。 */
@@ -83,8 +105,8 @@ export class DaemonConfigManager {
 			try {
 				loadedConfig = await loadVoxSpellConfig(this.#paths.configFile);
 				loadedCredentials = await loadVoxSpellCredentials(this.#paths.credentialsFile);
-				const asrProvider = this.#createCandidateProvider(loadedConfig, loadedCredentials);
-				this.#apply(loadedConfig, loadedCredentials, asrProvider);
+				const providers = this.#createCandidateProviders(loadedConfig, loadedCredentials);
+				this.#apply(loadedConfig, loadedCredentials, providers);
 			} catch (error) {
 				if (!this.#asrProvider && loadedConfig) {
 					this.#config = structuredClone(loadedConfig);
@@ -102,7 +124,7 @@ export class DaemonConfigManager {
 	async validate(config: VoxSpellConfig): Promise<void> {
 		await this.#enqueue(async () => {
 			const validatedConfig = parseVoxSpellConfig(config);
-			this.#createCandidateProvider(validatedConfig, this.#credentials);
+			this.#createCandidateProviders(validatedConfig, this.#credentials);
 		});
 	}
 
@@ -110,13 +132,13 @@ export class DaemonConfigManager {
 	async updateConfig(config: VoxSpellConfig): Promise<void> {
 		await this.#enqueue(async () => {
 			const validatedConfig = parseVoxSpellConfig(config);
-			const asrProvider = this.#createCandidateProvider(validatedConfig, this.#credentials);
+			const providers = this.#createCandidateProviders(validatedConfig, this.#credentials);
 			await saveVoxSpellConfig(
 				path.dirname(this.#paths.configFile),
 				this.#paths.configFile,
 				validatedConfig,
 			);
-			this.#apply(validatedConfig, this.#credentials, asrProvider);
+			this.#apply(validatedConfig, this.#credentials, providers);
 		});
 	}
 
@@ -133,6 +155,11 @@ export class DaemonConfigManager {
 		return this.#asrProvider;
 	}
 
+	/** 返回当前启用的 AI 文本润色器。 */
+	getTextPolisher(): TextPolisher | undefined {
+		return this.#textPolisher;
+	}
+
 	/** 返回当前生效配置的副本。 */
 	getConfig(): VoxSpellConfig | undefined {
 		if (!this.#config) return undefined;
@@ -147,6 +174,15 @@ export class DaemonConfigManager {
 	/** 返回已持久化的凭据名称，不暴露对应值。 */
 	getStoredCredentialNames(): readonly string[] {
 		return Object.keys(this.#credentials.values).sort();
+	}
+
+	/** 使用配置和凭据快照测试指定 Provider，不切换当前运行时。 */
+	async testProvider(providerId: string): Promise<ProviderTestResult> {
+		const provider = await this.#enqueue(async () => {
+			if (!this.#config) throw new VoxSpellConfigNotFoundError(this.#paths.configFile);
+			return this.#createCandidateProvider(this.#config, this.#credentials, providerId);
+		});
+		return testAsrProvider(provider);
 	}
 
 	/** 将协议中的增删操作应用为一份完整候选凭据。 */
@@ -167,10 +203,16 @@ export class DaemonConfigManager {
 		let missingCredentialNames: string[] = [];
 		if (this.#config) {
 			const effectiveEnvironment = this.#createEffectiveEnvironment(this.#credentials);
-			missingCredentialNames = getAsrProviderCredentialNames(
+			const asrCredentialNames = getAsrProviderCredentialNames(
 				this.#config,
 				this.#environment.VOXSPELL_ASR_PROVIDER,
-			).filter((name) => !effectiveEnvironment[name]);
+			);
+			const textPolisherCredentialNames = getTextPolisherCredentialNames(this.#config);
+			missingCredentialNames = [
+				...new Set([...asrCredentialNames, ...textPolisherCredentialNames]),
+			]
+				.filter((name) => !effectiveEnvironment[name])
+				.sort();
 		}
 		return {
 			state: this.#state,
@@ -185,14 +227,33 @@ export class DaemonConfigManager {
 	#createCandidateProvider(
 		config: VoxSpellConfig,
 		credentials: VoxSpellCredentials,
+		providerId?: string,
 	): RealtimeAsrProvider {
-		return this.#createProvider(config, this.#createEffectiveEnvironment(credentials));
+		return this.#createProvider(
+			config,
+			this.#createEffectiveEnvironment(credentials),
+			providerId,
+		);
+	}
+
+	#createCandidateProviders(
+		config: VoxSpellConfig,
+		credentials: VoxSpellCredentials,
+	): RuntimeProviderSnapshot {
+		const environment = this.#createEffectiveEnvironment(credentials);
+		return {
+			asrProvider: this.#createProvider(config, environment),
+			textPolisher: this.#createTextPolisher(config, environment),
+		};
 	}
 
 	async #saveAndApplyCredentials(credentials: VoxSpellCredentials): Promise<void> {
-		let asrProvider = this.#asrProvider;
+		let providers: Partial<RuntimeProviderSnapshot> = {
+			asrProvider: this.#asrProvider,
+			textPolisher: this.#textPolisher,
+		};
 		if (this.#config) {
-			asrProvider = this.#createCandidateProvider(this.#config, credentials);
+			providers = this.#createCandidateProviders(this.#config, credentials);
 		}
 		await saveVoxSpellCredentials(
 			this.#paths.directory,
@@ -200,9 +261,10 @@ export class DaemonConfigManager {
 			credentials,
 		);
 		this.#credentials = structuredClone(credentials);
-		this.#asrProvider = asrProvider;
+		this.#asrProvider = providers.asrProvider;
+		this.#textPolisher = providers.textPolisher;
 		this.#lastError = undefined;
-		if (this.#config && asrProvider) this.#state = 'ready';
+		if (this.#config && providers.asrProvider) this.#state = 'ready';
 	}
 
 	#createEffectiveEnvironment(credentials: VoxSpellCredentials): NodeJS.ProcessEnv {
@@ -212,11 +274,12 @@ export class DaemonConfigManager {
 	#apply(
 		config: VoxSpellConfig,
 		credentials: VoxSpellCredentials,
-		asrProvider: RealtimeAsrProvider,
+		providers: RuntimeProviderSnapshot,
 	): void {
 		this.#config = structuredClone(config);
 		this.#credentials = structuredClone(credentials);
-		this.#asrProvider = asrProvider;
+		this.#asrProvider = providers.asrProvider;
+		this.#textPolisher = providers.textPolisher;
 		this.#state = 'ready';
 		this.#lastError = undefined;
 	}

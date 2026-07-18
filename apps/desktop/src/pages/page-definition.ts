@@ -1,5 +1,5 @@
 export const pageDefinitions = [
-	{ id: 'overview', title: '概览', iconName: 'view-dashboard-symbolic' },
+	{ id: 'overview', title: '概览', iconName: 'view-grid-symbolic' },
 	{ id: 'recognition', title: '语音识别', iconName: 'audio-input-microphone-symbolic' },
 	{ id: 'input-behavior', title: '输入行为', iconName: 'input-keyboard-symbolic' },
 	{ id: 'text-processing', title: '文本处理', iconName: 'accessories-text-editor-symbolic' },

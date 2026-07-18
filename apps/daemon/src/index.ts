@@ -19,10 +19,13 @@ async function main(): Promise<void> {
 		if (process.env.VOXSPELL_DETERMINISTIC === '1') return deterministicProvider;
 		return configManager.getAsrProvider();
 	};
+	const getTextPolisher = (): ReturnType<DaemonConfigManager['getTextPolisher']> =>
+		configManager.getTextPolisher();
 	const runtime = new DaemonRuntime({
 		socketPath: resolveDaemonSocketPath(),
 		captureBackend: new PwRecordAudioCaptureBackend(),
 		getAsrProvider,
+		getTextPolisher,
 		configuration: configManager,
 		fcitx: new FcitxConfigClient(new NativeFcitxControllerTransport()),
 		onError: (error) => console.error(`[voxspell] ${error.name}: ${error.message}`),

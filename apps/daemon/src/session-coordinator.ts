@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
 
 import { TranscriptAssembler } from '@voxspell/asr-core/transcript-assembler';
-import { PassThroughTextPipeline } from '@voxspell/text-pipeline/text-pipeline';
+import { DefaultTextPipeline } from '@voxspell/text-pipeline/text-pipeline';
 
 import { transitionSessionState } from './session-state.js';
 
-import type { TextPolisher } from '@voxspell/ai-polisher/text-polisher';
+import type { PolishDictionaryEntry, TextPolisher } from '@voxspell/ai-polisher/text-polisher';
 import type {
 	AsrEvent,
 	RealtimeAsrProvider,
@@ -41,6 +41,8 @@ export interface SessionCoordinatorOptions {
 	readonly getAsrProvider?: () => RealtimeAsrProvider | undefined;
 	readonly textPipeline?: TextPipeline;
 	readonly textPolisher?: TextPolisher;
+	readonly getTextPolisher?: () => TextPolisher | undefined;
+	readonly getPolishDictionary?: () => readonly PolishDictionaryEntry[];
 	readonly publish?: (event: DaemonSessionEvent) => void;
 	readonly createSessionId?: () => SessionId;
 	readonly sessionGate?: DaemonSessionGate;
@@ -80,7 +82,8 @@ export class SessionCoordinator {
 	readonly #captureBackend: AudioCaptureBackend;
 	readonly #getAsrProvider: () => RealtimeAsrProvider | undefined;
 	readonly #textPipeline: TextPipeline;
-	readonly #textPolisher?: TextPolisher;
+	readonly #getTextPolisher: () => TextPolisher | undefined;
+	readonly #getPolishDictionary: () => readonly PolishDictionaryEntry[];
 	readonly #publish: (event: DaemonSessionEvent) => void;
 	readonly #createSessionId: () => SessionId;
 	readonly #sessionGate?: DaemonSessionGate;
@@ -92,8 +95,9 @@ export class SessionCoordinator {
 	constructor(options: SessionCoordinatorOptions) {
 		this.#captureBackend = options.captureBackend;
 		this.#getAsrProvider = options.getAsrProvider ?? (() => options.asrProvider);
-		this.#textPipeline = options.textPipeline ?? new PassThroughTextPipeline();
-		this.#textPolisher = options.textPolisher;
+		this.#textPipeline = options.textPipeline ?? new DefaultTextPipeline();
+		this.#getTextPolisher = options.getTextPolisher ?? (() => options.textPolisher);
+		this.#getPolishDictionary = options.getPolishDictionary ?? (() => []);
 		this.#publish = options.publish ?? (() => undefined);
 		this.#createSessionId = options.createSessionId ?? randomUUID;
 		this.#sessionGate = options.sessionGate;
@@ -398,7 +402,8 @@ export class SessionCoordinator {
 			return true;
 		}
 
-		if (!this.#textPolisher) {
+		const textPolisher = this.#getTextPolisher();
+		if (!textPolisher) {
 			this.#publishResults(active, 'transcript');
 			this.#completeResult(active, 'transcript', active.transcript);
 			return true;
@@ -407,20 +412,25 @@ export class SessionCoordinator {
 		this.#publishResults(active);
 		this.#transition(active, 'polishing');
 		this.#announcePhase(active, 'polishing');
-		await this.#runPolisher(active);
+		const dictionary = structuredClone(this.#getPolishDictionary());
+		await this.#runPolisher(active, textPolisher, dictionary);
 		return true;
 	}
 
-	async #runPolisher(active: ActiveSession): Promise<void> {
+	async #runPolisher(
+		active: ActiveSession,
+		textPolisher: TextPolisher,
+		dictionary: readonly PolishDictionaryEntry[],
+	): Promise<void> {
 		const controller = new AbortController();
 		active.polishAbortController = controller;
 		let polished = '';
 
 		try {
-			for await (const event of this.#textPolisher?.polish(
-				active.transcript!,
+			for await (const event of textPolisher.polish(
+				{ text: active.transcript!, dictionary },
 				controller.signal,
-			) ?? []) {
+			)) {
 				if (!this.#isCurrent(active) || this.#state !== 'polishing') return;
 				if (event.type === 'delta') {
 					polished = `${polished}${event.text}`;
@@ -436,7 +446,7 @@ export class SessionCoordinator {
 					return;
 				}
 				active.polished = await this.#textPipeline.processPolished(
-					polished,
+					{ transcript: active.transcript!, polished, dictionary },
 					controller.signal,
 				);
 				if (!this.#isCurrent(active) || this.#state !== 'polishing') return;
