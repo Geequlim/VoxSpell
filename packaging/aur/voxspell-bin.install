@@ -1,0 +1,9 @@
+post_install() {
+	echo 'VoxSpell daemon 将在下次桌面会话登录时自动启动。'
+	echo '首次安装后可运行 voxspell-daemon，或重新登录桌面会话。'
+	echo '请重启 Fcitx 5 以加载 VoxSpell 扩展。'
+}
+
+post_upgrade() {
+	echo '请重启 VoxSpell daemon 与 Fcitx 5 以应用升级。'
+}

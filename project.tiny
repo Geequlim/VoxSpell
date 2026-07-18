@@ -134,6 +134,13 @@ publish:
           command:
             - cmake -S native/fcitx5-addon -B dist/native/fcitx5-addon -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
             - cmake --build dist/native/fcitx5-addon
+    - name: aur
+      description: 在本地构建二进制发布资产并发布到 GitHub Release 与 AUR
+      command: node scripts/release-aur.mjs publish
+      actions:
+        - name: build
+          description: 仅构建 Arch 二进制发布资产与 AUR 元数据，不执行外部发布
+          command: node scripts/release-aur.mjs build
 
 tools:
   actions:
