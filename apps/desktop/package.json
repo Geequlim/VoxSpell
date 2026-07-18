@@ -4,6 +4,7 @@
 	"private": true,
 	"type": "module",
 	"dependencies": {
+		"@voxspell/config": "workspace:^",
 		"@voxspell/protocol": "workspace:^",
 		"mobx": "6.16.1",
 		"node-gtk": "4.1.1",

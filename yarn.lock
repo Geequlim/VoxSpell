@@ -2163,6 +2163,7 @@ __metadata:
     "@rspack/cli": "npm:2.1.4"
     "@rspack/core": "npm:2.1.4"
     "@types/node": "npm:24.13.3"
+    "@voxspell/config": "workspace:^"
     "@voxspell/protocol": "workspace:^"
     mobx: "npm:6.16.1"
     node-gtk: "npm:4.1.1"

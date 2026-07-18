@@ -5,6 +5,7 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { ResponseError } from 'vscode-jsonrpc';
 import {
 	StreamMessageReader,
 	StreamMessageWriter,
@@ -63,6 +64,8 @@ afterEach(async () => {
 
 describe('DaemonRpcClient', () => {
 	it('initializes and reads health and configuration status', async () => {
+		const updatedConfigs: unknown[] = [];
+		const updatedCredentials: unknown[] = [];
 		const testServer = await createTestServer((connection) => {
 			connection.onRequest('initialize', () => ({
 				protocolVersion: 1,
@@ -76,6 +79,33 @@ describe('DaemonRpcClient', () => {
 				credentialsPath: '/tmp/credentials',
 				missingCredentialNames: [],
 			}));
+			connection.onRequest('config.get', () => ({
+				version: 1,
+				asr: {
+					activeProvider: 'test',
+					providers: [
+						{
+							id: 'test',
+							type: 'openai-compatible-transcription',
+							baseUrl: 'https://example.com/v1',
+							apiKeyEnvironment: 'TEST_API_KEY',
+							model: 'test-model',
+						},
+					],
+				},
+			}));
+			connection.onRequest('config.validate', () => null);
+			connection.onRequest('config.update', (params) => {
+				updatedConfigs.push(params);
+				return null;
+			});
+			connection.onRequest('credentials.getStatus', () => ({
+				storedNames: ['TEST_API_KEY'],
+			}));
+			connection.onRequest('credentials.update', (params) => {
+				updatedCredentials.push(params);
+				return null;
+			});
 		});
 		const client = new DaemonRpcClient({ socketPath: testServer.socketPath });
 
@@ -84,6 +114,59 @@ describe('DaemonRpcClient', () => {
 		});
 		await expect(client.ping()).resolves.toEqual({ timestampMs: 42 });
 		await expect(client.getStatus()).resolves.toMatchObject({ state: 'ready' });
+		const config = await client.getConfig();
+		expect(config).toMatchObject({ asr: { activeProvider: 'test' } });
+		if (!config) throw new Error('Expected test configuration');
+		await expect(client.validateConfig(config)).resolves.toBeUndefined();
+		await expect(client.updateConfig(config)).resolves.toBeUndefined();
+		await expect(client.getCredentialsStatus()).resolves.toEqual({
+			storedNames: ['TEST_API_KEY'],
+		});
+		await expect(
+			client.updateCredentials({
+				set: [{ name: 'TEST_API_KEY', value: 'secret' }],
+				delete: [],
+			}),
+		).resolves.toBeUndefined();
+		expect(updatedConfigs).toHaveLength(1);
+		expect(updatedCredentials).toHaveLength(1);
+		client.dispose();
+	});
+
+	it('keeps the connection after a configuration business error', async () => {
+		const testServer = await createTestServer((connection) => {
+			connection.onRequest('initialize', () => ({
+				protocolVersion: 1,
+				serverInfo: { name: 'test-daemon', version: '1.2.3' },
+				capabilities: { partialTranscript: true, polishPreview: false },
+			}));
+			connection.onRequest('config.validate', () => {
+				throw new ResponseError(-33_000, 'Configuration operation failed', {
+					code: 'CONFIG_INVALID',
+					stage: 'config',
+					retryable: false,
+				});
+			});
+			connection.onRequest('daemon.ping', () => ({ timestampMs: 42 }));
+		});
+		const client = new DaemonRpcClient({ socketPath: testServer.socketPath });
+		await client.connect();
+		const config = {
+			version: 1 as const,
+			asr: {
+				activeProvider: 'test',
+				providers: [
+					{
+						id: 'test',
+						type: 'tencent-realtime' as const,
+						engineModelType: '16k_zh',
+					},
+				],
+			},
+		};
+
+		await expect(client.validateConfig(config)).rejects.toBeInstanceOf(ResponseError);
+		await expect(client.ping()).resolves.toEqual({ timestampMs: 42 });
 		client.dispose();
 	});
 

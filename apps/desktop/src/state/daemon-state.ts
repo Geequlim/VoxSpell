@@ -83,6 +83,17 @@ export class DaemonState {
 		void this.connect();
 	}
 
+	/** 刷新已连接 daemon 的配置状态。 */
+	async refresh(): Promise<void> {
+		if (this.connectionPhase !== 'connected') return;
+		try {
+			const status = await this.#client.getStatus();
+			this.applyStatus(status);
+		} catch {
+			// RPC 客户端负责在传输失败时触发断线重连。
+		}
+	}
+
 	/** 释放重试计时器和 RPC 客户端。 */
 	dispose(): void {
 		if (this.#disposed) return;
@@ -130,6 +141,11 @@ export class DaemonState {
 		this.initializeResult = undefined;
 		this.status = undefined;
 		this.lastError = describeConnectionError(error);
+	}
+
+	@action private applyStatus(status: DaemonGetStatusResult): void {
+		if (this.connectionPhase !== 'connected') return;
+		this.status = status;
 	}
 
 	@action private handleDisconnect(): void {

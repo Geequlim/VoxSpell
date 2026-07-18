@@ -2,13 +2,27 @@ import { createConnection } from 'node:net';
 
 import { PROTOCOL_VERSION } from '@voxspell/protocol/common';
 import {
+	ConfigGetRequest,
+	ConfigGetResultSchema,
+	ConfigUpdateRequest,
+	ConfigUpdateResultSchema,
+	ConfigValidateRequest,
+	ConfigValidateResultSchema,
+} from '@voxspell/protocol/config';
+import {
+	CredentialsGetStatusRequest,
+	CredentialsGetStatusResultSchema,
+	CredentialsUpdateRequest,
+	CredentialsUpdateResultSchema,
+} from '@voxspell/protocol/credentials';
+import {
 	DaemonGetStatusRequest,
 	DaemonGetStatusResultSchema,
 	DaemonPingRequest,
 	DaemonPingResultSchema,
 } from '@voxspell/protocol/daemon';
 import { InitializeRequest, InitializeResultSchema } from '@voxspell/protocol/initialize';
-import { validateProtocolValue } from '@voxspell/protocol/validation';
+import { ProtocolValidationError, validateProtocolValue } from '@voxspell/protocol/validation';
 import {
 	StreamMessageReader,
 	StreamMessageWriter,
@@ -16,6 +30,12 @@ import {
 } from 'vscode-jsonrpc/node';
 
 import type { Socket } from 'node:net';
+import type { VoxSpellConfig } from '@voxspell/config/config-schema';
+import type { ConfigGetResult } from '@voxspell/protocol/config';
+import type {
+	CredentialsGetStatusResult,
+	CredentialsUpdateParams,
+} from '@voxspell/protocol/credentials';
 import type { DaemonGetStatusResult, DaemonPingResult } from '@voxspell/protocol/daemon';
 import type { InitializeResult } from '@voxspell/protocol/initialize';
 import type { MessageConnection } from 'vscode-jsonrpc/node';
@@ -79,7 +99,7 @@ export class DaemonRpcClient {
 			);
 			return validateProtocolValue(DaemonPingResultSchema, result);
 		} catch (error) {
-			this.#resetConnection(true);
+			this.#resetInvalidConnection(error);
 			throw error;
 		}
 	}
@@ -94,7 +114,82 @@ export class DaemonRpcClient {
 			);
 			return validateProtocolValue(DaemonGetStatusResultSchema, result);
 		} catch (error) {
-			this.#resetConnection(true);
+			this.#resetInvalidConnection(error);
+			throw error;
+		}
+	}
+
+	/** 读取 daemon 当前生效的配置。 */
+	async getConfig(): Promise<ConfigGetResult> {
+		const connection = this.#requireConnection();
+		try {
+			const result = await this.#requestWithTimeout(
+				connection.sendRequest(ConfigGetRequest, {}),
+				'config.get',
+			);
+			return validateProtocolValue(ConfigGetResultSchema, result);
+		} catch (error) {
+			this.#resetInvalidConnection(error);
+			throw error;
+		}
+	}
+
+	/** 让 daemon 校验候选配置，但不保存。 */
+	async validateConfig(config: VoxSpellConfig): Promise<void> {
+		const connection = this.#requireConnection();
+		try {
+			const result = await this.#requestWithTimeout(
+				connection.sendRequest(ConfigValidateRequest, { config }),
+				'config.validate',
+			);
+			validateProtocolValue(ConfigValidateResultSchema, result);
+		} catch (error) {
+			this.#resetInvalidConnection(error);
+			throw error;
+		}
+	}
+
+	/** 原子保存候选配置并切换 daemon 运行时。 */
+	async updateConfig(config: VoxSpellConfig): Promise<void> {
+		const connection = this.#requireConnection();
+		try {
+			const result = await this.#requestWithTimeout(
+				connection.sendRequest(ConfigUpdateRequest, { config }),
+				'config.update',
+			);
+			validateProtocolValue(ConfigUpdateResultSchema, result);
+		} catch (error) {
+			this.#resetInvalidConnection(error);
+			throw error;
+		}
+	}
+
+	/** 获取已安全存储的凭据名称，不读取凭据值。 */
+	async getCredentialsStatus(): Promise<CredentialsGetStatusResult> {
+		const connection = this.#requireConnection();
+		try {
+			const result = await this.#requestWithTimeout(
+				connection.sendRequest(CredentialsGetStatusRequest, {}),
+				'credentials.getStatus',
+			);
+			return validateProtocolValue(CredentialsGetStatusResultSchema, result);
+		} catch (error) {
+			this.#resetInvalidConnection(error);
+			throw error;
+		}
+	}
+
+	/** 更新应用私有凭据存储中的指定条目。 */
+	async updateCredentials(params: CredentialsUpdateParams): Promise<void> {
+		const connection = this.#requireConnection();
+		try {
+			const result = await this.#requestWithTimeout(
+				connection.sendRequest(CredentialsUpdateRequest, params),
+				'credentials.update',
+			);
+			validateProtocolValue(CredentialsUpdateResultSchema, result);
+		} catch (error) {
+			this.#resetInvalidConnection(error);
 			throw error;
 		}
 	}
@@ -204,6 +299,12 @@ export class DaemonRpcClient {
 				},
 			);
 		});
+	}
+
+	#resetInvalidConnection(error: unknown): void {
+		if (error instanceof DaemonRpcTimeoutError || error instanceof ProtocolValidationError) {
+			this.#resetConnection(true);
+		}
 	}
 
 	#resetConnection(notify: boolean): void {
