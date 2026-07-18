@@ -1,5 +1,6 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
+import { ProtocolErrorDataSchema } from '../src/errors.js';
 import { InitializeParamsSchema } from '../src/initialize.js';
 import {
 	SessionPhaseParamsSchema,
@@ -67,6 +68,16 @@ describe('validateProtocolValue', () => {
 				phase: 'preparing',
 			}),
 		).toEqual({ sessionId: SESSION_ID, phase: 'preparing' });
+	});
+
+	it('accepts the recording safety timeout error', () => {
+		expect(
+			validateProtocolValue(ProtocolErrorDataSchema, {
+				code: 'SESSION_TIMEOUT',
+				stage: 'session',
+				retryable: false,
+			}),
+		).toEqual({ code: 'SESSION_TIMEOUT', stage: 'session', retryable: false });
 	});
 
 	it('keeps daemon-owned text processing options out of session.start', () => {

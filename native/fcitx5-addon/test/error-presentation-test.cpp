@@ -16,6 +16,12 @@ int main() {
 	assert(
 		sessionError.diagnostic ==
 		"错误码: ASR_FAILED · 阶段: asr · 服务: UNAUTHORIZED · 可重试");
+	const auto timeoutError = presentSessionError({
+		.code = "SESSION_TIMEOUT",
+		.stage = "session",
+		.retryable = false,
+	});
+	assert(timeoutError.summary == "语音输入已达到最长时限");
 
 	const auto connectionError = presentClientError("Connection refused");
 	assert(connectionError.summary == "后台服务未运行或尚未就绪");

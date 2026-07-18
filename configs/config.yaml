@@ -37,3 +37,5 @@ polishing:
       baseUrl: https://api.deepseek.com
       apiKeyEnvironment: DEEPSEEK_API_KEY
       model: deepseek-v4-flash
+session:
+  maximumRecordingSeconds: 300

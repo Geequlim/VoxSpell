@@ -1,0 +1,13 @@
+[Unit]
+Description=VoxSpell voice input daemon
+StartLimitIntervalSec=30
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/voxspell-daemon
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

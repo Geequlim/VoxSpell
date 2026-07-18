@@ -18,6 +18,7 @@ const PCM_PACKET_BYTES = 6_400;
 const DEFAULT_PACKET_INTERVAL_MILLISECONDS = 200;
 const DEFAULT_HANDSHAKE_TIMEOUT_MILLISECONDS = 5_000;
 const DEFAULT_FINAL_TIMEOUT_MILLISECONDS = 10_000;
+const DEFAULT_CLOSE_GRACE_MILLISECONDS = 500;
 
 interface PendingRead<T> {
 	readonly resolve: (result: IteratorResult<T>) => void;
@@ -33,6 +34,7 @@ interface TencentRealtimeAsrSessionOptions {
 	readonly packetIntervalMilliseconds?: number;
 	readonly handshakeTimeoutMilliseconds?: number;
 	readonly finalTimeoutMilliseconds?: number;
+	readonly closeGraceMilliseconds?: number;
 }
 
 /** 为 Provider 事件提供可在生产者启动前订阅的有序异步队列。 */
@@ -84,6 +86,7 @@ export class TencentRealtimeAsrSession implements RealtimeAsrSession {
 	readonly #segments = new Map<number, string>();
 	readonly #abortController = new AbortController();
 	#socket?: WebSocket;
+	#socketClosed?: PromiseWithResolvers<void>;
 	#handshake?: PromiseWithResolvers<void>;
 	#handshakeTimer?: NodeJS.Timeout;
 	#finalTimer?: NodeJS.Timeout;
@@ -95,6 +98,7 @@ export class TencentRealtimeAsrSession implements RealtimeAsrSession {
 	#completed = false;
 	#failed = false;
 	#cancelled = false;
+	#cancelOperation?: Promise<void>;
 
 	constructor(options: TencentRealtimeAsrSessionOptions) {
 		this.#options = options;
@@ -114,14 +118,18 @@ export class TencentRealtimeAsrSession implements RealtimeAsrSession {
 		const url = createTencentAsrUrl(this.#options);
 		const socket = new WebSocket(url);
 		this.#socket = socket;
+		this.#socketClosed = Promise.withResolvers<void>();
 		this.#handshake = Promise.withResolvers<void>();
 		socket.on('message', (data, isBinary) => this.#handleMessage(data, isBinary));
-		socket.once('error', () => this.#handleSocketFailure());
-		socket.once('close', () => this.#handleSocketClose());
+		socket.once('error', () => void this.#handleSocketFailure());
+		socket.once('close', () => {
+			this.#socketClosed?.resolve();
+			void this.#handleSocketClose();
+		});
 		const handshakeTimeout =
 			this.#options.handshakeTimeoutMilliseconds ?? DEFAULT_HANDSHAKE_TIMEOUT_MILLISECONDS;
 		this.#handshakeTimer = setTimeout(
-			() => this.#failHandshake('Tencent ASR handshake timed out'),
+			() => void this.#failHandshake('Tencent ASR handshake timed out'),
 			handshakeTimeout,
 		);
 		await this.#handshake.promise;
@@ -142,17 +150,26 @@ export class TencentRealtimeAsrSession implements RealtimeAsrSession {
 		const finalTimeout =
 			this.#options.finalTimeoutMilliseconds ?? DEFAULT_FINAL_TIMEOUT_MILLISECONDS;
 		this.#finalTimer = setTimeout(() => {
-			this.#emitError({ type: 'error', code: 'FINAL_TIMEOUT', retryable: true });
+			void this.#emitError({ type: 'error', code: 'FINAL_TIMEOUT', retryable: true });
 		}, finalTimeout);
 	}
 
 	async cancel(reason?: string): Promise<void> {
-		if (this.#cancelled || this.#completed) return;
+		if (this.#completed) {
+			await this.#closeSocket(false);
+			return;
+		}
+		this.#cancelOperation ??= this.#cancel(reason);
+		await this.#cancelOperation;
+	}
+
+	async #cancel(reason?: string): Promise<void> {
 		this.#cancelled = true;
 		this.#abortController.abort(reason);
 		this.#clearTimers();
 		this.#handshake?.reject(new Error('Tencent ASR session was cancelled'));
-		this.#closeSocket();
+		this.#handshake = undefined;
+		await this.#closeSocket(false);
 		this.#events.close();
 		this.#removeAbortListener();
 	}
@@ -205,8 +222,11 @@ export class TencentRealtimeAsrSession implements RealtimeAsrSession {
 		}
 		if (value.code !== 0) {
 			const event = createTencentAsrErrorEvent(value.code);
-			if (this.#handshake) this.#failHandshake(`Tencent ASR handshake failed: ${event.code}`);
-			else this.#emitError(event);
+			if (this.#handshake) {
+				void this.#failHandshake(`Tencent ASR handshake failed: ${event.code}`);
+			} else {
+				void this.#emitError(event);
+			}
 			return;
 		}
 
@@ -214,7 +234,7 @@ export class TencentRealtimeAsrSession implements RealtimeAsrSession {
 			this.#completeHandshake();
 		}
 		if (value.result) this.#handleResult(value.result);
-		if (value.final === 1) this.#handleCompleted();
+		if (value.final === 1) void this.#handleCompleted();
 	}
 
 	#handleResult(result: {
@@ -238,20 +258,25 @@ export class TencentRealtimeAsrSession implements RealtimeAsrSession {
 		});
 	}
 
-	#handleCompleted(): void {
+	async #handleCompleted(): Promise<void> {
+		if (this.#completed || this.#failed || this.#cancelled) return;
 		const text = [...this.#segments.entries()]
 			.sort(([left], [right]) => left - right)
 			.map(([, segment]) => segment)
 			.join('');
 		if (!text) {
-			this.#emitError({ type: 'error', code: 'EMPTY_TRANSCRIPT', retryable: false });
+			await this.#emitError({
+				type: 'error',
+				code: 'EMPTY_TRANSCRIPT',
+				retryable: false,
+			});
 			return;
 		}
 		this.#completed = true;
 		this.#clearTimers();
+		await this.#closeSocket(true);
 		this.#events.push({ type: 'completed', text });
 		this.#events.close();
-		this.#closeSocket();
 		this.#removeAbortListener();
 	}
 
@@ -266,49 +291,49 @@ export class TencentRealtimeAsrSession implements RealtimeAsrSession {
 
 	#handleInvalidResponse(): void {
 		if (this.#handshake) {
-			this.#failHandshake('Tencent ASR returned an invalid handshake response');
+			void this.#failHandshake('Tencent ASR returned an invalid handshake response');
 			return;
 		}
-		this.#emitError({ type: 'error', code: 'INVALID_RESPONSE', retryable: false });
+		void this.#emitError({ type: 'error', code: 'INVALID_RESPONSE', retryable: false });
 	}
 
-	#handleSocketFailure(): void {
+	async #handleSocketFailure(): Promise<void> {
 		if (this.#cancelled || this.#completed || this.#failed) return;
 		if (this.#handshake) {
-			this.#failHandshake('Tencent ASR connection failed');
+			await this.#failHandshake('Tencent ASR connection failed');
 			return;
 		}
-		this.#emitError({ type: 'error', code: 'NETWORK_ERROR', retryable: true });
+		await this.#emitError({ type: 'error', code: 'NETWORK_ERROR', retryable: true });
 	}
 
-	#handleSocketClose(): void {
+	async #handleSocketClose(): Promise<void> {
 		if (this.#cancelled || this.#completed || this.#failed) return;
 		if (this.#handshake) {
-			this.#failHandshake('Tencent ASR connection closed during handshake');
+			await this.#failHandshake('Tencent ASR connection closed during handshake');
 			return;
 		}
-		this.#emitError({ type: 'error', code: 'CONNECTION_CLOSED', retryable: true });
+		await this.#emitError({ type: 'error', code: 'CONNECTION_CLOSED', retryable: true });
 	}
 
-	#failHandshake(message: string): void {
+	async #failHandshake(message: string): Promise<void> {
 		if (!this.#handshake || this.#failed) return;
 		this.#failed = true;
 		this.#clearTimers();
 		const handshake = this.#handshake;
 		this.#handshake = undefined;
+		await this.#closeSocket(false);
 		handshake.reject(new Error(message));
 		this.#events.close();
-		this.#closeSocket();
 		this.#removeAbortListener();
 	}
 
-	#emitError(event: Extract<AsrEvent, { readonly type: 'error' }>): void {
+	async #emitError(event: Extract<AsrEvent, { readonly type: 'error' }>): Promise<void> {
 		if (this.#failed || this.#cancelled || this.#completed) return;
 		this.#failed = true;
 		this.#clearTimers();
+		await this.#closeSocket(false);
 		this.#events.push(event);
 		this.#events.close();
-		this.#closeSocket();
 		this.#removeAbortListener();
 	}
 
@@ -319,11 +344,30 @@ export class TencentRealtimeAsrSession implements RealtimeAsrSession {
 		this.#finalTimer = undefined;
 	}
 
-	#closeSocket(): void {
+	async #closeSocket(graceful: boolean): Promise<void> {
 		const socket = this.#socket;
 		if (!socket) return;
-		if (socket.readyState === WebSocket.OPEN) socket.close();
-		else if (socket.readyState === WebSocket.CONNECTING) socket.terminate();
+		if (socket.readyState === WebSocket.CLOSED) {
+			this.#socket = undefined;
+			return;
+		}
+		const closed = this.#socketClosed?.promise ?? Promise.resolve();
+		if (!graceful || socket.readyState === WebSocket.CONNECTING) {
+			socket.terminate();
+		} else if (socket.readyState === WebSocket.OPEN) {
+			socket.close();
+		}
+		if (graceful) {
+			const closeGrace =
+				this.#options.closeGraceMilliseconds ?? DEFAULT_CLOSE_GRACE_MILLISECONDS;
+			const closedGracefully = await Promise.race([
+				closed.then(() => true),
+				delay(closeGrace).then(() => false),
+			]);
+			if (!closedGracefully) socket.terminate();
+		}
+		await closed;
+		if (this.#socket === socket) this.#socket = undefined;
 	}
 
 	#removeAbortListener(): void {

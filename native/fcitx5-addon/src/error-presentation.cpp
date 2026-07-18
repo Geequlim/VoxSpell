@@ -12,6 +12,7 @@ std::string summaryForCode(const std::string &code) {
 	if (code == "SESSION_NOT_FOUND" || code == "INVALID_SESSION_STATE") {
 		return "语音会话状态异常";
 	}
+	if (code == "SESSION_TIMEOUT") return "语音输入已达到最长时限";
 	if (code == "CAPTURE_FAILED") return "无法启动或读取麦克风";
 	if (code == "ASR_FAILED") return "语音识别服务失败";
 	if (code == "PROCESSING_FAILED") return "识别结果处理失败";

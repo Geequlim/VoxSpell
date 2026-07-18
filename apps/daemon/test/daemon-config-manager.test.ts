@@ -98,6 +98,23 @@ describe('DaemonConfigManager', () => {
 		expect(manager.getTrimTrailingPeriod()).toBe(true);
 	});
 
+	it('provides the configured recording limit and defaults to five minutes', async () => {
+		const paths = await createPaths();
+		await saveVoxSpellConfig(paths.directory, paths.configFile, validConfig);
+		const manager = new DaemonConfigManager({
+			paths,
+			environment: { OPENROUTER_API_KEY: 'secret' },
+		});
+		await manager.initialize();
+
+		expect(manager.getMaximumRecordingMilliseconds()).toBe(300_000);
+		await manager.updateConfig({
+			...validConfig,
+			session: { maximumRecordingSeconds: 45 },
+		});
+		expect(manager.getMaximumRecordingMilliseconds()).toBe(45_000);
+	});
+
 	it('activates a valid pending config when its missing credentials are supplied', async () => {
 		const paths = await createPaths();
 		await saveVoxSpellConfig(paths.directory, paths.configFile, validConfig);

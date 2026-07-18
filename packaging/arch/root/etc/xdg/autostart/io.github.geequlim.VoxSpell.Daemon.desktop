@@ -1,8 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=VoxSpell Daemon
-Comment=VoxSpell 语音输入后台服务
-Exec=voxspell-daemon
-Terminal=false
-NoDisplay=true
-X-GNOME-Autostart-enabled=true

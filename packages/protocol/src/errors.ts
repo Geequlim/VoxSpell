@@ -10,6 +10,7 @@ export const ProtocolErrorCodeSchema = Type.Union([
 	Type.Literal('SESSION_BUSY'),
 	Type.Literal('SESSION_NOT_FOUND'),
 	Type.Literal('INVALID_SESSION_STATE'),
+	Type.Literal('SESSION_TIMEOUT'),
 	Type.Literal('CAPTURE_FAILED'),
 	Type.Literal('ASR_FAILED'),
 	Type.Literal('PROCESSING_FAILED'),

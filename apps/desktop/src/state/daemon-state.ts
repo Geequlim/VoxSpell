@@ -44,7 +44,7 @@ export class DaemonState {
 	@derived get statusDescription(): string {
 		if (this.connectionPhase === 'connecting') return '正在连接本地 VoxSpell 服务。';
 		if (this.connectionPhase !== 'connected') {
-			return this.lastError ?? '请先在开发终端启动 daemon，桌面端会自动重试。';
+			return this.lastError ?? 'Daemon 尚未启动，可通过右侧按钮启动。';
 		}
 		if (this.status?.lastError) return this.status.lastError;
 		if (this.status?.state === 'needs-configuration') {

@@ -44,6 +44,30 @@ describe('VoxSpell config', () => {
 		expect(config.textProcessing?.trimTrailingPeriod).toBe(true);
 	});
 
+	it('accepts a bounded maximum recording duration', () => {
+		const config = parseVoxSpellConfig({
+			...validConfig,
+			session: { maximumRecordingSeconds: 300 },
+		});
+
+		expect(config.session?.maximumRecordingSeconds).toBe(300);
+	});
+
+	it('rejects a maximum recording duration outside the supported range', () => {
+		expect(() =>
+			parseVoxSpellConfig({
+				...validConfig,
+				session: { maximumRecordingSeconds: 0 },
+			}),
+		).toThrow(VoxSpellConfigError);
+		expect(() =>
+			parseVoxSpellConfig({
+				...validConfig,
+				session: { maximumRecordingSeconds: 3_601 },
+			}),
+		).toThrow(VoxSpellConfigError);
+	});
+
 	it('rejects an unknown active provider', () => {
 		expect(() =>
 			parseVoxSpellConfig({

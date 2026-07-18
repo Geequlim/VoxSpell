@@ -31,6 +31,7 @@ async function main(): Promise<void> {
 		getTextPolisher,
 		getTextPolishingPolicy: () => configManager.getTextPolishingPolicy(),
 		getTrimTrailingPeriod: () => configManager.getTrimTrailingPeriod(),
+		getMaximumRecordingMilliseconds: () => configManager.getMaximumRecordingMilliseconds(),
 		getDictionary: () => dictionaryManager.getSnapshot(),
 		configuration: configManager,
 		dictionary: dictionaryManager,
@@ -43,6 +44,18 @@ async function main(): Promise<void> {
 				` retryable=${error.retryable}`;
 			if (error.providerCode) message += ` provider=${error.providerCode}`;
 			console.error(message);
+		},
+		onSessionSettled: ({
+			sessionId,
+			outcome,
+			asrDurationMilliseconds,
+			durationMilliseconds,
+		}) => {
+			console.log(
+				`[voxspell] session.closed session=${sessionId}` +
+					` outcome=${outcome} asr_duration_ms=${asrDurationMilliseconds}` +
+					` duration_ms=${durationMilliseconds}`,
+			);
 		},
 	});
 	let stopping = false;

@@ -1,3 +1,8 @@
+import {
+	MAXIMUM_RECORDING_SECONDS,
+	MINIMUM_RECORDING_SECONDS,
+} from '@voxspell/config/config-schema';
+
 import { Adw, Gtk } from '../gtk';
 import { gtk } from '../state/gtk';
 import { createFormEntryRow, createFormPasswordEntryRow } from './form-row';
@@ -70,6 +75,15 @@ class RecognitionPageView {
 	@bind.visible((state) => state.showsTencentFields)
 	@bind.sensitive((state) => state.isEditable)
 	readonly engineModelRow: InstanceType<typeof Adw.EntryRow>;
+	@bind.prop('value', (state) => state.maximumRecordingSeconds)
+	@bind.prop('title', (state) =>
+		getFieldTitle('最长录音时长（秒）', state.fieldErrors.maximumRecordingSeconds),
+	)
+	@bind.listen<InstanceType<typeof Adw.SpinRow>>('notify::value', (state, row) =>
+		state.updateMaximumRecordingSeconds(Math.round(row.value)),
+	)
+	@bind.sensitive((state) => state.isEditable)
+	readonly maximumRecordingSecondsRow: InstanceType<typeof Adw.SpinRow>;
 	@bind.prop('active', (state) => state.trimTrailingPeriod)
 	@bind.listen<InstanceType<typeof Adw.SwitchRow>>('notify::active', (state, row) =>
 		state.updateTrimTrailingPeriod(row.active),
@@ -172,6 +186,7 @@ class RecognitionPageView {
 		modelRow: InstanceType<typeof Adw.EntryRow>,
 		apiKeyEnvironmentRow: InstanceType<typeof Adw.EntryRow>,
 		engineModelRow: InstanceType<typeof Adw.EntryRow>,
+		maximumRecordingSecondsRow: InstanceType<typeof Adw.SpinRow>,
 		trimTrailingPeriodRow: InstanceType<typeof Adw.SwitchRow>,
 		credentialNameRow: InstanceType<typeof Adw.ComboRow>,
 		credentialValueRow: InstanceType<typeof Adw.PasswordEntryRow>,
@@ -196,6 +211,7 @@ class RecognitionPageView {
 		this.modelRow = modelRow;
 		this.apiKeyEnvironmentRow = apiKeyEnvironmentRow;
 		this.engineModelRow = engineModelRow;
+		this.maximumRecordingSecondsRow = maximumRecordingSecondsRow;
 		this.trimTrailingPeriodRow = trimTrailingPeriodRow;
 		this.credentialNameRow = credentialNameRow;
 		this.credentialValueRow = credentialValueRow;
@@ -239,6 +255,21 @@ export function createRecognitionPage(
 	providerGroup.add(modelRow);
 	providerGroup.add(apiKeyEnvironmentRow);
 	providerGroup.add(engineModelRow);
+	const maximumRecordingSecondsRow = new Adw.SpinRow({
+		title: '最长录音时长（秒）',
+		subtitle: '达到时限后自动结束并关闭实时识别连接。',
+		adjustment: new Gtk.Adjustment({
+			lower: MINIMUM_RECORDING_SECONDS,
+			upper: MAXIMUM_RECORDING_SECONDS,
+			stepIncrement: 1,
+			pageIncrement: 30,
+			value: 300,
+		}),
+		digits: 0,
+		numeric: true,
+	});
+	const recordingGroup = new Adw.PreferencesGroup({ title: '录音' });
+	recordingGroup.add(maximumRecordingSecondsRow);
 	const trimTrailingPeriodRow = new Adw.SwitchRow({
 		title: '裁剪尾部句号',
 		subtitle: '提交前移除末尾的中文句号或单个英文句号。',
@@ -313,6 +344,7 @@ export function createRecognitionPage(
 
 	const root = new Adw.PreferencesPage({ title: '语音识别' });
 	root.add(providerGroup);
+	root.add(recordingGroup);
 	root.add(textProcessingGroup);
 	root.add(credentialGroup);
 	root.add(providerManagementGroup);
@@ -328,6 +360,7 @@ export function createRecognitionPage(
 		modelRow,
 		apiKeyEnvironmentRow,
 		engineModelRow,
+		maximumRecordingSecondsRow,
 		trimTrailingPeriodRow,
 		credentialNameRow,
 		credentialValueRow,

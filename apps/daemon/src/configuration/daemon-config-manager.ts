@@ -1,6 +1,7 @@
 import path from 'node:path';
 
 import { getAsrProviderCredentialNames } from '@voxspell/config/asr-provider';
+import { DEFAULT_MAXIMUM_RECORDING_SECONDS } from '@voxspell/config/config-schema';
 import {
 	createEmptyCredentials,
 	loadVoxSpellCredentials,
@@ -176,6 +177,13 @@ export class DaemonConfigManager {
 	/** 返回新会话使用的确定性文本处理配置。 */
 	getTrimTrailingPeriod(): boolean {
 		return this.#config?.textProcessing?.trimTrailingPeriod ?? false;
+	}
+
+	/** 返回新会话允许的最长录音时长。 */
+	getMaximumRecordingMilliseconds(): number {
+		const seconds =
+			this.#config?.session?.maximumRecordingSeconds ?? DEFAULT_MAXIMUM_RECORDING_SECONDS;
+		return seconds * 1_000;
 	}
 
 	/** 返回当前生效配置的副本。 */

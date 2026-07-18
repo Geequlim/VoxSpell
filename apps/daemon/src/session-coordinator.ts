@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { TranscriptAssembler } from '@voxspell/asr-core/transcript-assembler';
+import { DEFAULT_MAXIMUM_RECORDING_SECONDS } from '@voxspell/config/config-schema';
 import {
 	countEffectiveCharacters,
 	DefaultTextPipeline,
@@ -33,6 +34,8 @@ import type { AudioCaptureBackend, AudioCaptureSession } from './audio-capture.j
 import type { SessionState } from './session-state.js';
 import type { DaemonSessionGate } from './session-gate.js';
 
+const DEFAULT_MAXIMUM_RECORDING_MILLISECONDS = DEFAULT_MAXIMUM_RECORDING_SECONDS * 1_000;
+
 export type DaemonSessionEvent =
 	| { readonly method: 'session.phase'; readonly params: SessionPhaseParams }
 	| { readonly method: 'session.preview'; readonly params: SessionPreviewParams }
@@ -55,12 +58,23 @@ export interface SessionCoordinatorOptions {
 	readonly createSessionId?: () => SessionId;
 	readonly sessionGate?: DaemonSessionGate;
 	readonly onFailure?: (diagnostic: SessionFailureDiagnostic) => void;
+	readonly onSettled?: (diagnostic: SessionSettlementDiagnostic) => void;
+	readonly maximumRecordingMilliseconds?: number;
+	readonly getMaximumRecordingMilliseconds?: () => number;
+	readonly now?: () => number;
 }
 
 export interface SessionFailureDiagnostic {
 	readonly sessionId?: SessionId;
 	readonly phase: SessionPhase | SessionState;
 	readonly error: ProtocolErrorData;
+}
+
+export interface SessionSettlementDiagnostic {
+	readonly sessionId: SessionId;
+	readonly outcome: 'completed' | 'cancelled' | 'failed';
+	readonly asrDurationMilliseconds: number;
+	readonly durationMilliseconds: number;
 }
 
 export interface TextPolishingPolicy {
@@ -79,6 +93,7 @@ interface ActiveSession {
 	readonly textPolisher?: TextPolisher;
 	readonly polishingPolicy: TextPolishingPolicy;
 	readonly trimTrailingPeriod: boolean;
+	readonly startedAt: number;
 	polishingMode: SessionPolishingMode;
 	polishingEnabled?: boolean;
 	capture?: AudioCaptureSession;
@@ -92,6 +107,8 @@ interface ActiveSession {
 	finishOperation?: Promise<void>;
 	cancelOperation?: Promise<void>;
 	failure?: ProtocolErrorData;
+	recordingTimer?: NodeJS.Timeout;
+	asrSettledAt?: number;
 }
 
 /** 表示可安全映射到 JSON-RPC error.data 的会话操作错误。 */
@@ -118,6 +135,9 @@ export class SessionCoordinator {
 	readonly #createSessionId: () => SessionId;
 	readonly #sessionGate?: DaemonSessionGate;
 	readonly #onFailure: (diagnostic: SessionFailureDiagnostic) => void;
+	readonly #onSettled: (diagnostic: SessionSettlementDiagnostic) => void;
+	readonly #getMaximumRecordingMilliseconds: () => number;
+	readonly #now: () => number;
 	readonly #sessionOwner = {};
 	#state: SessionState = 'idle';
 	#active?: ActiveSession;
@@ -138,6 +158,11 @@ export class SessionCoordinator {
 		this.#createSessionId = options.createSessionId ?? randomUUID;
 		this.#sessionGate = options.sessionGate;
 		this.#onFailure = options.onFailure ?? (() => undefined);
+		this.#onSettled = options.onSettled ?? (() => undefined);
+		this.#getMaximumRecordingMilliseconds =
+			options.getMaximumRecordingMilliseconds ??
+			(() => options.maximumRecordingMilliseconds ?? DEFAULT_MAXIMUM_RECORDING_MILLISECONDS);
+		this.#now = options.now ?? Date.now;
 	}
 
 	get state(): SessionState {
@@ -189,6 +214,7 @@ export class SessionCoordinator {
 			textPolisher: this.#getTextPolisher(),
 			polishingPolicy: this.#getTextPolishingPolicy(),
 			trimTrailingPeriod: this.#getTrimTrailingPeriod(),
+			startedAt: this.#now(),
 			polishingMode: 'auto',
 		};
 		this.#active = active;
@@ -228,6 +254,13 @@ export class SessionCoordinator {
 
 		this.#transition(active, 'recording');
 		this.#announcePhase(active, 'recording');
+		active.recordingTimer = setTimeout(() => {
+			void this.#fail(active, {
+				code: 'SESSION_TIMEOUT',
+				stage: 'session',
+				retryable: false,
+			});
+		}, this.#getMaximumRecordingMilliseconds());
 		active.audioPump = this.#pumpAudio(active);
 
 		return { sessionId: active.id };
@@ -313,6 +346,7 @@ export class SessionCoordinator {
 		}
 
 		this.#transition(active, 'finishing');
+		this.#clearRecordingTimer(active);
 
 		try {
 			await active.capture?.stop();
@@ -355,9 +389,10 @@ export class SessionCoordinator {
 		active.polishAbortController?.abort(reason);
 
 		await Promise.allSettled([active.capture?.cancel(reason), active.asr?.cancel(reason)]);
+		active.asrSettledAt = this.#now();
 		if (!this.#isCurrent(active)) return;
 		this.#transition(active, 'cancelled');
-		this.#settle(active);
+		this.#settle(active, 'cancelled');
 	}
 
 	async #pumpAudio(active: ActiveSession): Promise<void> {
@@ -430,6 +465,7 @@ export class SessionCoordinator {
 				return false;
 			}
 			case 'completed':
+				active.asrSettledAt = this.#now();
 				return this.#processTranscript(active, event.text);
 			case 'error':
 				await this.#fail(active, {
@@ -608,7 +644,7 @@ export class SessionCoordinator {
 			method: 'session.completed',
 			params: { sessionId: active.id, selectedChoiceId: choiceId, text },
 		});
-		this.#settle(active);
+		this.#settle(active, 'completed');
 	}
 
 	async #fail(active: ActiveSession, data: ProtocolErrorData): Promise<void> {
@@ -628,21 +664,37 @@ export class SessionCoordinator {
 			active.capture?.cancel(data.code),
 			active.asr?.cancel(data.code),
 		]);
+		active.asrSettledAt = this.#now();
 		if (!this.#isCurrent(active)) return;
 		this.#transition(active, 'failed');
 		this.#publish({
 			method: 'session.error',
 			params: { sessionId: active.id, error: data },
 		});
-		this.#settle(active);
+		this.#settle(active, 'failed');
 	}
 
-	#settle(active: ActiveSession): void {
+	#settle(active: ActiveSession, outcome: SessionSettlementDiagnostic['outcome']): void {
 		if (!this.#isCurrent(active)) return;
+		this.#clearRecordingTimer(active);
 		this.#lastSettledSessionId = active.id;
 		this.#active = undefined;
 		this.#state = transitionSessionState(this.#state, 'idle');
 		this.#sessionGate?.release(this.#sessionOwner);
+		this.#onSettled({
+			sessionId: active.id,
+			outcome,
+			asrDurationMilliseconds: Math.max(
+				0,
+				(active.asrSettledAt ?? this.#now()) - active.startedAt,
+			),
+			durationMilliseconds: Math.max(0, this.#now() - active.startedAt),
+		});
+	}
+
+	#clearRecordingTimer(active: ActiveSession): void {
+		clearTimeout(active.recordingTimer);
+		active.recordingTimer = undefined;
 	}
 
 	#transition(active: ActiveSession, state: SessionState): void {

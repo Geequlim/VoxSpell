@@ -1,0 +1,3 @@
+#!/bin/sh
+
+exec /usr/lib/voxspell/runtime/bin/node /usr/lib/voxspell/desktop/index.cjs "$@"

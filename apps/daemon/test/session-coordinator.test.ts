@@ -11,6 +11,7 @@ import type { TextPolisher } from '@voxspell/ai-polisher/text-polisher';
 import type { TextPipeline } from '@voxspell/text-pipeline/text-pipeline';
 import type { DaemonSessionEvent, SessionCoordinatorOptions } from '../src/session-coordinator.js';
 import type { SessionFailureDiagnostic } from '../src/session-coordinator.js';
+import type { SessionSettlementDiagnostic } from '../src/session-coordinator.js';
 
 const SESSION_ID = '0190c95b-7f28-7b12-8b6f-a4d3fd239013';
 const NEXT_SESSION_ID = '0190c95b-7f28-7b12-8b6f-a4d3fd239014';
@@ -20,6 +21,7 @@ interface TestContext {
 	readonly asrProvider: FakeRealtimeAsrProvider;
 	readonly events: DaemonSessionEvent[];
 	readonly failures: SessionFailureDiagnostic[];
+	readonly settlements: SessionSettlementDiagnostic[];
 	readonly coordinator: SessionCoordinator;
 }
 
@@ -32,6 +34,9 @@ interface TestContextOptions {
 	readonly getTrimTrailingPeriod?: SessionCoordinatorOptions['getTrimTrailingPeriod'];
 	readonly getDictionary?: SessionCoordinatorOptions['getDictionary'];
 	readonly sessionGate?: DaemonSessionGate;
+	readonly maximumRecordingMilliseconds?: number;
+	readonly getMaximumRecordingMilliseconds?: SessionCoordinatorOptions['getMaximumRecordingMilliseconds'];
+	readonly now?: () => number;
 }
 
 /** 创建使用确定性 ID 和测试 fake 的协调器。 */
@@ -41,6 +46,7 @@ function createTestContext(options: TestContextOptions = {}): TestContext {
 	const asrProvider = new FakeRealtimeAsrProvider();
 	const events: DaemonSessionEvent[] = [];
 	const failures: SessionFailureDiagnostic[] = [];
+	const settlements: SessionSettlementDiagnostic[] = [];
 	const coordinator = new SessionCoordinator({
 		captureBackend,
 		asrProvider,
@@ -53,6 +59,10 @@ function createTestContext(options: TestContextOptions = {}): TestContext {
 		sessionGate: options.sessionGate,
 		publish: (event) => events.push(event),
 		onFailure: (diagnostic) => failures.push(diagnostic),
+		onSettled: (diagnostic) => settlements.push(diagnostic),
+		maximumRecordingMilliseconds: options.maximumRecordingMilliseconds,
+		getMaximumRecordingMilliseconds: options.getMaximumRecordingMilliseconds,
+		now: options.now,
 		createSessionId: () => {
 			const sessionId = sessionIds.shift();
 			if (!sessionId) throw new Error('No fake session ID available');
@@ -60,7 +70,7 @@ function createTestContext(options: TestContextOptions = {}): TestContext {
 		},
 	});
 
-	return { captureBackend, asrProvider, events, failures, coordinator };
+	return { captureBackend, asrProvider, events, failures, settlements, coordinator };
 }
 
 /** 推进 fake 会话到确定性文本处理阶段。 */
@@ -391,6 +401,62 @@ describe('SessionCoordinator', () => {
 		expect(context.coordinator.state).toBe('idle');
 		expect(context.captureBackend.sessions[0].cancelCalls).toBe(1);
 		expect(context.asrProvider.sessions[0].cancelCalls).toBe(1);
+	});
+
+	it('fails and closes capture and ASR after the maximum recording duration', async () => {
+		const context = createTestContext({ maximumRecordingMilliseconds: 20 });
+		await context.coordinator.start('input-context-1');
+
+		await vi.waitFor(() => expect(context.coordinator.state).toBe('idle'));
+
+		expect(context.captureBackend.sessions[0].cancelCalls).toBe(1);
+		expect(context.asrProvider.sessions[0].cancelCalls).toBe(1);
+		expect(context.events.at(-1)).toEqual({
+			method: 'session.error',
+			params: {
+				sessionId: SESSION_ID,
+				error: { code: 'SESSION_TIMEOUT', stage: 'session', retryable: false },
+			},
+		});
+		expect(context.settlements).toHaveLength(1);
+		expect(context.settlements[0]).toMatchObject({
+			sessionId: SESSION_ID,
+			outcome: 'failed',
+		});
+	});
+
+	it('reads the recording limit when each new session starts', async () => {
+		let maximumRecordingMilliseconds = 20;
+		const context = createTestContext({
+			sessionIds: [SESSION_ID, NEXT_SESSION_ID],
+			getMaximumRecordingMilliseconds: () => maximumRecordingMilliseconds,
+		});
+		await context.coordinator.start('input-context-1');
+		await vi.waitFor(() => expect(context.coordinator.state).toBe('idle'));
+
+		maximumRecordingMilliseconds = 1_000;
+		await context.coordinator.start('input-context-2');
+		await new Promise((resolve) => setTimeout(resolve, 30));
+		expect(context.coordinator.state).toBe('recording');
+		await context.coordinator.cancel(NEXT_SESSION_ID, 'user');
+	});
+
+	it('reports provider session duration when cancellation has fully settled', async () => {
+		let now = 1_000;
+		const context = createTestContext({ now: () => now });
+		await context.coordinator.start('input-context-1');
+		now = 1_250;
+
+		await context.coordinator.cancel(SESSION_ID, 'focus-lost');
+
+		expect(context.settlements).toEqual([
+			{
+				sessionId: SESSION_ID,
+				outcome: 'cancelled',
+				asrDurationMilliseconds: 250,
+				durationMilliseconds: 250,
+			},
+		]);
 	});
 
 	it('reports Provider failures with a stable protocol error', async () => {

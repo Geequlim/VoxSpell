@@ -1,4 +1,9 @@
 import { getAsrProviderCredentialNames } from '@voxspell/config/asr-provider';
+import {
+	DEFAULT_MAXIMUM_RECORDING_SECONDS,
+	MAXIMUM_RECORDING_SECONDS,
+	MINIMUM_RECORDING_SECONDS,
+} from '@voxspell/config/config-schema';
 import { DEFAULT_POLISH_SYSTEM_PROMPT } from '@voxspell/config/text-polishing-defaults';
 import { toJS } from 'mobx';
 import { ResponseError } from 'vscode-jsonrpc';
@@ -141,6 +146,10 @@ export class ConfigState {
 
 	@derived get trimTrailingPeriod(): boolean {
 		return this.draft?.textProcessing?.trimTrailingPeriod ?? false;
+	}
+
+	@derived get maximumRecordingSeconds(): number {
+		return this.draft?.session?.maximumRecordingSeconds ?? DEFAULT_MAXIMUM_RECORDING_SECONDS;
 	}
 
 	@derived get activeTextPolisher() {
@@ -390,6 +399,13 @@ export class ConfigState {
 		this.scheduleAutoSave();
 	}
 
+	/** 更新单次会话允许的最长录音时长。 */
+	@action updateMaximumRecordingSeconds(maximumRecordingSeconds: number): void {
+		if (!this.draft) return;
+		this.draft.session = { maximumRecordingSeconds };
+		this.scheduleAutoSave(300);
+	}
+
 	/** 更新 AI 润色 Provider 的 API 地址。 */
 	@action updatePolishingBaseUrl(value: string): void {
 		const provider = this.getOrCreateTextPolisher();
@@ -567,6 +583,15 @@ export class ConfigState {
 			(item) => item.id === candidate.asr.activeProvider,
 		);
 		const fieldErrors: Record<string, string> = {};
+		const maximumRecordingSeconds = candidate.session?.maximumRecordingSeconds;
+		if (
+			maximumRecordingSeconds !== undefined &&
+			(!Number.isInteger(maximumRecordingSeconds) ||
+				maximumRecordingSeconds < MINIMUM_RECORDING_SECONDS ||
+				maximumRecordingSeconds > MAXIMUM_RECORDING_SECONDS)
+		) {
+			fieldErrors.maximumRecordingSeconds = `请输入 ${MINIMUM_RECORDING_SECONDS}–${MAXIMUM_RECORDING_SECONDS} 之间的整数秒数。`;
+		}
 		const providerIds = candidate.asr.providers.map((item) => item.id);
 		if (providerIds.some((id) => !id.trim())) fieldErrors.providerId = '请输入服务标识。';
 		if (new Set(providerIds).size !== providerIds.length) {
@@ -773,6 +798,7 @@ function createInitialConfig(): VoxSpellConfig {
 				},
 			],
 		},
+		session: { maximumRecordingSeconds: DEFAULT_MAXIMUM_RECORDING_SECONDS },
 		textProcessing: { trimTrailingPeriod: false },
 		polishing: {
 			enabled: false,
@@ -813,6 +839,7 @@ function getFieldLabel(field: string): string {
 		model: '语音识别模型',
 		apiKeyEnvironment: '语音识别凭据名称',
 		engineModelType: '语音识别引擎模型',
+		maximumRecordingSeconds: '最长录音时长',
 		polishingSystemPrompt: 'AI 润色系统提示词',
 		textPolisher: 'AI 润色服务',
 		polishingBaseUrl: 'AI 润色 API 地址',

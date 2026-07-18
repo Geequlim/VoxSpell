@@ -2,6 +2,10 @@ import { Type } from '@sinclair/typebox';
 
 import type { Static } from '@sinclair/typebox';
 
+export const DEFAULT_MAXIMUM_RECORDING_SECONDS = 300;
+export const MINIMUM_RECORDING_SECONDS = 1;
+export const MAXIMUM_RECORDING_SECONDS = 3_600;
+
 export const OpenAiCompatibleTranscriptionProviderConfigSchema = Type.Object(
 	{
 		id: Type.String({ minLength: 1 }),
@@ -68,6 +72,17 @@ export const TextProcessingConfigSchema = Type.Object(
 );
 export type TextProcessingConfig = Static<typeof TextProcessingConfigSchema>;
 
+export const SessionConfigSchema = Type.Object(
+	{
+		maximumRecordingSeconds: Type.Integer({
+			minimum: MINIMUM_RECORDING_SECONDS,
+			maximum: MAXIMUM_RECORDING_SECONDS,
+		}),
+	},
+	{ additionalProperties: false },
+);
+export type SessionConfig = Static<typeof SessionConfigSchema>;
+
 export const VoxSpellConfigSchema = Type.Object(
 	{
 		version: Type.Literal(1),
@@ -80,6 +95,7 @@ export const VoxSpellConfigSchema = Type.Object(
 			},
 			{ additionalProperties: false },
 		),
+		session: Type.Optional(SessionConfigSchema),
 		textProcessing: Type.Optional(TextProcessingConfigSchema),
 		polishing: Type.Optional(TextPolishingConfigSchema),
 	},

@@ -16,6 +16,7 @@ export interface TencentRealtimeAsrProviderOptions {
 	readonly packetIntervalMilliseconds?: number;
 	readonly handshakeTimeoutMilliseconds?: number;
 	readonly finalTimeoutMilliseconds?: number;
+	readonly closeGraceMilliseconds?: number;
 }
 
 /** 使用腾讯云 WebSocket API 的实时 ASR Provider。 */

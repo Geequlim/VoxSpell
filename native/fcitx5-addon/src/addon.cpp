@@ -505,6 +505,7 @@ private:
 	void startVoiceSession(fcitx::InputContext *inputContext) {
 		FCITX_LOGC(voxspellLog, Info) << "session.start requested";
 		cancelVoiceSession(nullptr, "replaced");
+		pendingStartCancelReason_.reset();
 		voiceInputContext_ = inputContext->watch();
 		voiceSessionId_.clear();
 		startPending_ = true;
@@ -817,7 +818,9 @@ private:
 	void handleSessionStarted(const std::string &sessionId) {
 		auto *inputContext = voiceInputContext_.get();
 		if (!inputContext) {
-			daemonClient_->cancel(sessionId, "focus-lost");
+			const auto reason = pendingStartCancelReason_.value_or("focus-lost");
+			pendingStartCancelReason_.reset();
+			daemonClient_->cancel(sessionId, reason);
 			return;
 		}
 		if (!voiceSessionId_.empty() && voiceSessionId_ != sessionId) {
@@ -837,6 +840,12 @@ private:
 
 	void handlePhase(const protocol::SessionPhaseParams &params) {
 		auto *inputContext = voiceInputContext_.get();
+		if (!inputContext && pendingStartCancelReason_ &&
+			params.phase == "preparing") {
+			daemonClient_->cancel(params.sessionId, *pendingStartCancelReason_);
+			pendingStartCancelReason_.reset();
+			return;
+		}
 		if (!inputContext) {
 			return;
 		}
@@ -970,6 +979,7 @@ private:
 		fcitx::InputContext *inputContext,
 		std::string reason) {
 		auto *activeInputContext = voiceInputContext_.get();
+		const bool cancellingPendingStart = voiceSessionId_.empty() && startPending_;
 		if (inputContext && inputContext != activeInputContext) {
 			return;
 		}
@@ -984,6 +994,7 @@ private:
 			}
 			voiceInputContext_.unwatch();
 			clearVoiceSessionState();
+			if (cancellingPendingStart) pendingStartCancelReason_ = std::move(reason);
 			return;
 		}
 		if (voiceSessionId_.empty()) {
@@ -993,6 +1004,7 @@ private:
 		}
 		voiceInputContext_.unwatch();
 		clearVoiceSessionState();
+		if (cancellingPendingStart) pendingStartCancelReason_ = std::move(reason);
 	}
 
 	void clearVoiceSessionState() {
@@ -1052,6 +1064,7 @@ private:
 	fcitx::TrackableObjectReference<fcitx::InputContext> voiceInputContext_;
 	std::string voiceSessionId_;
 	bool startPending_ = false;
+	std::optional<std::string> pendingStartCancelReason_;
 	std::string sessionPhase_;
 	std::string previewText_;
 	std::optional<protocol::TranscriptResult> transcriptResult_;

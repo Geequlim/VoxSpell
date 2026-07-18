@@ -134,6 +134,34 @@ describe('ConfigState', () => {
 		disposeTestState(state);
 	});
 
+	it('shows the five-minute recording default and automatically saves changes', async () => {
+		const state = createTestState();
+		await vi.waitFor(() => expect(state.config.draft).toBeDefined());
+
+		expect(state.config.maximumRecordingSeconds).toBe(300);
+		state.config.updateMaximumRecordingSeconds(180);
+		await state.config.flushPendingChanges();
+
+		expect(state.client.updateConfig).toHaveBeenCalledWith(
+			expect.objectContaining({ session: { maximumRecordingSeconds: 180 } }),
+		);
+		expect(state.config.phase).toBe('saved');
+		disposeTestState(state);
+	});
+
+	it('reports an invalid recording limit before saving', async () => {
+		const state = createTestState();
+		await vi.waitFor(() => expect(state.config.draft).toBeDefined());
+
+		state.config.updateMaximumRecordingSeconds(0);
+		await state.config.flushPendingChanges();
+
+		expect(state.config.fieldErrors.maximumRecordingSeconds).toContain('1–3600');
+		expect(state.config.operationDescription).toContain('最长录音时长');
+		expect(state.client.updateConfig).not.toHaveBeenCalled();
+		disposeTestState(state);
+	});
+
 	it('creates and automatically saves editable AI polishing configuration', async () => {
 		const state = createTestState();
 		await vi.waitFor(() => expect(state.config.draft).toBeDefined());

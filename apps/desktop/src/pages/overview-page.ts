@@ -16,9 +16,20 @@ class OverviewPageView {
 	@bind.prop('title', (state) => state.daemon.statusTitle)
 	@bind.prop('subtitle', (state) => state.daemon.statusDescription)
 	readonly statusRow: InstanceType<typeof Adw.ActionRow>;
-	@bind.visible((state) => state.daemon.retryVisible)
-	@bind.click((state) => state.daemon.retry())
-	readonly retryButton: InstanceType<typeof Gtk.Button>;
+	@bind.label((state) => state.daemonService.primaryActionLabel)
+	@bind.sensitive((state) => state.daemonService.isControllable)
+	@bind.click((state) => void state.runDaemonServiceAction())
+	readonly serviceButton: InstanceType<typeof Gtk.Button>;
+	@bind.prop('active', (state) => state.daemonService.enabled)
+	@bind.listen<InstanceType<typeof Adw.SwitchRow>>(
+		'notify::active',
+		(state, row) => void state.daemonService.setEnabled(row.active),
+	)
+	@bind.sensitive((state) => state.daemonService.isControllable)
+	readonly autostartRow: InstanceType<typeof Adw.SwitchRow>;
+	@bind.prop('subtitle', (state) => state.daemonService.operationDescription)
+	@bind.visible((state) => Boolean(state.daemonService.operationDescription))
+	readonly serviceOperationRow: InstanceType<typeof Adw.ActionRow>;
 	@bind.prop('subtitle', (state) => getActiveProviderDescription(state))
 	readonly providerRow: InstanceType<typeof Adw.ActionRow>;
 	@bind.visible(
@@ -40,7 +51,9 @@ class OverviewPageView {
 		root: InstanceType<typeof Adw.PreferencesPage>,
 		statusIcon: InstanceType<typeof Gtk.Image>,
 		statusRow: InstanceType<typeof Adw.ActionRow>,
-		retryButton: InstanceType<typeof Gtk.Button>,
+		serviceButton: InstanceType<typeof Gtk.Button>,
+		autostartRow: InstanceType<typeof Adw.SwitchRow>,
+		serviceOperationRow: InstanceType<typeof Adw.ActionRow>,
 		providerRow: InstanceType<typeof Adw.ActionRow>,
 		realtimeBadge: InstanceType<typeof Gtk.Label>,
 		polishingRow: InstanceType<typeof Adw.ActionRow>,
@@ -51,7 +64,9 @@ class OverviewPageView {
 		this.root = root;
 		this.statusIcon = statusIcon;
 		this.statusRow = statusRow;
-		this.retryButton = retryButton;
+		this.serviceButton = serviceButton;
+		this.autostartRow = autostartRow;
+		this.serviceOperationRow = serviceOperationRow;
 		this.providerRow = providerRow;
 		this.realtimeBadge = realtimeBadge;
 		this.polishingRow = polishingRow;
@@ -64,15 +79,22 @@ class OverviewPageView {
 /** 创建桌面端运行状态与主要配置摘要页面。 */
 export function createOverviewPage(state: DesktopState): InstanceType<typeof Adw.PreferencesPage> {
 	const statusIcon = new Gtk.Image({ iconName: 'network-offline-symbolic' });
-	const retryButton = new Gtk.Button({ label: '立即重试', valign: Gtk.Align.CENTER });
+	const serviceButton = new Gtk.Button({ label: '启动', valign: Gtk.Align.CENTER });
 	const statusRow = new Adw.ActionRow({ title: '', subtitle: '' });
 	statusRow.addPrefix(statusIcon);
-	statusRow.addSuffix(retryButton);
+	statusRow.addSuffix(serviceButton);
+	const autostartRow = new Adw.SwitchRow({
+		title: '开机启动',
+		subtitle: '开机后自动启动 VoxSpell 后台服务。',
+	});
+	const serviceOperationRow = new Adw.ActionRow({ title: '后台服务', subtitle: '' });
 	const statusGroup = new Adw.PreferencesGroup({
 		title: '运行状态',
 		description: '桌面端会自动连接本地 VoxSpell 服务。',
 	});
 	statusGroup.add(statusRow);
+	statusGroup.add(autostartRow);
+	statusGroup.add(serviceOperationRow);
 
 	const providerRow = new Adw.ActionRow({ title: '当前识别服务', subtitle: '' });
 	const realtimeBadge = new Gtk.Label({
@@ -112,7 +134,9 @@ export function createOverviewPage(state: DesktopState): InstanceType<typeof Adw
 		root,
 		statusIcon,
 		statusRow,
-		retryButton,
+		serviceButton,
+		autostartRow,
+		serviceOperationRow,
 		providerRow,
 		realtimeBadge,
 		polishingRow,

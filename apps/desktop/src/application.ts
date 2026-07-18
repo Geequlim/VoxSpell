@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { DesktopState } from './desktop-state';
+import { SystemdDaemonServiceClient } from './daemon-service-client';
 import { FcitxInputBehaviorClient } from './fcitx/input-behavior-client';
 import { Adw, Gio, Gtk } from './gtk';
 import { resolveDaemonSocketPath } from './rpc/daemon-socket-path';
@@ -24,7 +25,12 @@ export function runApplication(): number {
 
 		const client = new DaemonRpcClient({ socketPath: resolveDaemonSocketPath() });
 		const fcitxClient = new FcitxInputBehaviorClient();
-		const state = new DesktopState(client, fcitxClient, fcitxClient);
+		const state = new DesktopState(
+			client,
+			new SystemdDaemonServiceClient(),
+			fcitxClient,
+			fcitxClient,
+		);
 		const window = createAppWindow(application, state);
 		Gtk.IconTheme.getForDisplay(window.getDisplay()).addSearchPath(
 			path.join(__dirname, 'icons'),

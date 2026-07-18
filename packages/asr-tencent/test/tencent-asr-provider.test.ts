@@ -2,7 +2,7 @@ import { once } from 'node:events';
 
 import type WebSocket from 'ws';
 import { WebSocketServer } from 'ws';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { TencentRealtimeAsrProvider } from '../src/tencent-asr-provider.js';
 
@@ -47,6 +47,7 @@ describe('TencentRealtimeAsrProvider', () => {
 				{ type: 'completed', text: '你好' },
 			]);
 			expect(receivedPacketSizes).toEqual([6_400, 600]);
+			await vi.waitFor(() => expect(server.clients.size).toBe(0));
 		} finally {
 			await closeServer(server);
 		}
@@ -69,6 +70,7 @@ describe('TencentRealtimeAsrProvider', () => {
 				{ type: 'ready' },
 				{ type: 'error', code: 'AUTHENTICATION_FAILED', retryable: false },
 			]);
+			await vi.waitFor(() => expect(server.clients.size).toBe(0));
 		} finally {
 			await closeServer(server);
 		}
@@ -88,6 +90,7 @@ describe('TencentRealtimeAsrProvider', () => {
 				{ type: 'ready' },
 				{ type: 'error', code: 'FINAL_TIMEOUT', retryable: true },
 			]);
+			await vi.waitFor(() => expect(server.clients.size).toBe(0));
 		} finally {
 			await closeServer(server);
 		}
@@ -113,6 +116,67 @@ describe('TencentRealtimeAsrProvider', () => {
 				{ type: 'ready' },
 				{ type: 'error', code: 'EMPTY_TRANSCRIPT', retryable: false },
 			]);
+			await vi.waitFor(() => expect(server.clients.size).toBe(0));
+		} finally {
+			await closeServer(server);
+		}
+	});
+
+	it('physically closes the WebSocket before cancel resolves', async () => {
+		const server = await createServer((socket) => {
+			socket.send(JSON.stringify({ code: 0, message: 'success', voice_id: 'voice-5' }));
+		});
+
+		try {
+			const session = await createSession(server);
+			await session.start(new AbortController().signal);
+			await session.cancel('user');
+
+			await vi.waitFor(() => expect(server.clients.size).toBe(0));
+			expect(await collectEvents(session)).toEqual([{ type: 'ready' }]);
+		} finally {
+			await closeServer(server);
+		}
+	});
+
+	it('physically closes a connection aborted during the handshake', async () => {
+		const server = await createServer(() => undefined);
+
+		try {
+			const session = await createSession(server);
+			const controller = new AbortController();
+			const start = session.start(controller.signal);
+			await vi.waitFor(() => expect(server.clients.size).toBe(1));
+			controller.abort('focus-lost');
+
+			await expect(start).rejects.toThrow('cancelled');
+			await vi.waitFor(() => expect(server.clients.size).toBe(0));
+		} finally {
+			await closeServer(server);
+		}
+	});
+
+	it('forcefully closes after the peer ignores the closing handshake', async () => {
+		const server = await createServer((socket) => {
+			socket.close = () => undefined;
+			socket.send(JSON.stringify({ code: 0, message: 'success', voice_id: 'voice-6' }));
+			socket.on('message', (data, isBinary) => {
+				if (isBinary || JSON.parse(data.toString()).type !== 'end') return;
+				socket.send(createResultMessage(0, 2, '安全关闭'));
+				socket.send(
+					JSON.stringify({ code: 0, message: 'success', voice_id: 'voice-6', final: 1 }),
+				);
+			});
+		});
+
+		try {
+			const session = await createSession(server, 500, 20);
+			await session.start(new AbortController().signal);
+			const events = collectEvents(session);
+			await session.finish();
+
+			expect(await events).toContainEqual({ type: 'completed', text: '安全关闭' });
+			await vi.waitFor(() => expect(server.clients.size).toBe(0));
 		} finally {
 			await closeServer(server);
 		}
@@ -129,6 +193,7 @@ async function createServer(onConnection: (socket: WebSocket) => void): Promise<
 async function createSession(
 	server: WebSocketServer,
 	finalTimeoutMilliseconds = 500,
+	closeGraceMilliseconds = 500,
 ): Promise<RealtimeAsrSession> {
 	const address = server.address() as AddressInfo;
 	const provider = new TencentRealtimeAsrProvider({
@@ -140,6 +205,7 @@ async function createSession(
 		endpoint: `ws://127.0.0.1:${address.port}/asr/v2`,
 		packetIntervalMilliseconds: 0,
 		finalTimeoutMilliseconds,
+		closeGraceMilliseconds,
 	});
 	return provider.createSession({ sessionId: SESSION_ID });
 }

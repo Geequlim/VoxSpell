@@ -29,7 +29,9 @@ import type { UnixSocketClient } from '../transport/unix-socket-server.js';
 import type { DaemonConfigurationRpcService } from '../rpc/daemon-rpc-connection.js';
 import type { DaemonDictionaryRpcService } from '../rpc/daemon-rpc-connection.js';
 import type { FcitxConfigurationRpcService } from '../rpc/daemon-rpc-connection.js';
-import type { SessionFailureDiagnostic, TextPolishingPolicy } from '../session-coordinator.js';
+import type { SessionFailureDiagnostic } from '../session-coordinator.js';
+import type { SessionSettlementDiagnostic } from '../session-coordinator.js';
+import type { TextPolishingPolicy } from '../session-coordinator.js';
 
 export interface DaemonRuntimeOptions {
 	readonly socketPath: string;
@@ -46,10 +48,12 @@ export interface DaemonRuntimeOptions {
 	readonly getTextPolisher?: () => TextPolisher | undefined;
 	readonly getTextPolishingPolicy?: () => TextPolishingPolicy;
 	readonly getTrimTrailingPeriod?: () => boolean;
+	readonly getMaximumRecordingMilliseconds?: () => number;
 	readonly getDictionary?: () => CompiledVoiceDictionary;
 	readonly maximumContentLength?: number;
 	readonly onError?: (error: Error) => void;
 	readonly onSessionFailure?: (diagnostic: SessionFailureDiagnostic) => void;
+	readonly onSessionSettled?: (diagnostic: SessionSettlementDiagnostic) => void;
 }
 
 /** 表示 daemon 缺少启动所需的本地运行环境。 */
@@ -90,10 +94,12 @@ export class DaemonRuntime {
 			options.getTextPolishingPolicy ??
 			(() => ({ defaultEnabled: true, minimumEffectiveCharacters: 0 }));
 		const getTrimTrailingPeriod = options.getTrimTrailingPeriod ?? (() => false);
+		const getMaximumRecordingMilliseconds = options.getMaximumRecordingMilliseconds;
 		const getDictionary = options.getDictionary;
 		const maximumContentLength = options.maximumContentLength ?? DEFAULT_MAX_CONTENT_LENGTH;
 		const onError = options.onError ?? (() => undefined);
 		const onSessionFailure = options.onSessionFailure ?? (() => undefined);
+		const onSessionSettled = options.onSessionSettled ?? (() => undefined);
 
 		this.#server = new UnixSocketServer({
 			socketPath: options.socketPath,
@@ -107,6 +113,7 @@ export class DaemonRuntime {
 					getTextPolisher,
 					getTextPolishingPolicy,
 					getTrimTrailingPeriod,
+					getMaximumRecordingMilliseconds,
 					getDictionary,
 					this.#sessionGate,
 					maximumContentLength,
@@ -115,6 +122,7 @@ export class DaemonRuntime {
 					fcitx,
 					onError,
 					onSessionFailure,
+					onSessionSettled,
 				),
 		});
 	}
@@ -141,6 +149,7 @@ export class DaemonRuntime {
 		getTextPolisher: () => TextPolisher | undefined,
 		getTextPolishingPolicy: () => TextPolishingPolicy,
 		getTrimTrailingPeriod: () => boolean,
+		getMaximumRecordingMilliseconds: (() => number) | undefined,
 		getDictionary: (() => CompiledVoiceDictionary) | undefined,
 		sessionGate: DaemonSessionGate,
 		maximumContentLength: number,
@@ -149,6 +158,7 @@ export class DaemonRuntime {
 		fcitx: FcitxConfigurationRpcService,
 		onError: (error: Error) => void,
 		onSessionFailure: (diagnostic: SessionFailureDiagnostic) => void,
+		onSessionSettled: (diagnostic: SessionSettlementDiagnostic) => void,
 	): UnixSocketClient {
 		const limiter = new ContentLengthLimitTransform(maximumContentLength);
 		socket.pipe(limiter);
@@ -174,10 +184,12 @@ export class DaemonRuntime {
 					getTextPolisher,
 					getTextPolishingPolicy,
 					getTrimTrailingPeriod,
+					getMaximumRecordingMilliseconds,
 					getDictionary,
 					sessionGate,
 					publish,
 					onFailure: onSessionFailure,
+					onSettled: onSessionSettled,
 				}),
 		});
 

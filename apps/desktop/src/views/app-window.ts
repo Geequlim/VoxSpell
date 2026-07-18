@@ -113,17 +113,14 @@ export function createAppWindow(
 	viewRows.forEach(([row, page]) => view.pageByRow.set(row, page));
 	view.state = state;
 	navigationList.selectRow(viewRows[0]?.[0] ?? null);
-	let closingAfterFlush = false;
+	let closing = false;
 	window.on('close-request', () => {
-		if (closingAfterFlush) return false;
+		if (closing) return true;
+		closing = true;
 		void state
 			.flushPendingChanges()
-			.then(() => {
-				if (state.config.isDirty || state.inputBehavior.isDirty) return;
-				closingAfterFlush = true;
-				window.close();
-			})
-			.catch(() => undefined);
+			.catch(() => undefined)
+			.then(() => window.destroy());
 		return true;
 	});
 	return window;
