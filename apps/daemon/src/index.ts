@@ -4,16 +4,19 @@ import { resolveVoxSpellConfigPaths } from '@voxspell/config/config-paths';
 
 import { PwRecordAudioCaptureBackend } from './audio/pw-record-audio-capture.js';
 import { DaemonConfigManager } from './configuration/daemon-config-manager.js';
+import { DaemonDictionaryManager } from './configuration/daemon-dictionary-manager.js';
 import { DeterministicAsrProvider } from './dev/deterministic-asr.js';
 import { FcitxConfigClient, NativeFcitxControllerTransport } from './fcitx/fcitx-config-client.js';
 import { DaemonRuntime, resolveDaemonSocketPath } from './runtime/create-daemon.js';
 
 /** 启动 daemon，并在进程信号到达时完成清理。 */
 async function main(): Promise<void> {
-	const configManager = new DaemonConfigManager({
-		paths: resolveVoxSpellConfigPaths(process.env, homedir()),
-	});
+	const paths = resolveVoxSpellConfigPaths(process.env, homedir());
+	const configManager = new DaemonConfigManager({ paths });
+	const dictionaryManager = new DaemonDictionaryManager(paths.dictionaryFile);
 	await configManager.initialize();
+	await dictionaryManager.initialize();
+	await dictionaryManager.startWatching();
 	const deterministicProvider = new DeterministicAsrProvider();
 	const getAsrProvider = (): ReturnType<DaemonConfigManager['getAsrProvider']> => {
 		if (process.env.VOXSPELL_DETERMINISTIC === '1') return deterministicProvider;
@@ -26,9 +29,21 @@ async function main(): Promise<void> {
 		captureBackend: new PwRecordAudioCaptureBackend(),
 		getAsrProvider,
 		getTextPolisher,
+		getTextPolishingPolicy: () => configManager.getTextPolishingPolicy(),
+		getTrimTrailingPeriod: () => configManager.getTrimTrailingPeriod(),
+		getDictionary: () => dictionaryManager.getSnapshot(),
 		configuration: configManager,
+		dictionary: dictionaryManager,
 		fcitx: new FcitxConfigClient(new NativeFcitxControllerTransport()),
 		onError: (error) => console.error(`[voxspell] ${error.name}: ${error.message}`),
+		onSessionFailure: ({ sessionId, phase, error }) => {
+			let message =
+				`[voxspell] session.error session=${sessionId ?? 'pending'}` +
+				` phase=${phase} code=${error.code} stage=${error.stage}` +
+				` retryable=${error.retryable}`;
+			if (error.providerCode) message += ` provider=${error.providerCode}`;
+			console.error(message);
+		},
 	});
 	let stopping = false;
 
@@ -43,6 +58,8 @@ async function main(): Promise<void> {
 				`[voxspell] shutdown failed: ${error instanceof Error ? error.message : 'unknown error'}`,
 			);
 			process.exitCode = 1;
+		} finally {
+			dictionaryManager.dispose();
 		}
 	};
 

@@ -1,5 +1,8 @@
 import { OpenAiCompatibleTextPolisher } from '@voxspell/ai-polisher/openai-compatible-text-polisher';
-import { resolveTextPolisherProvider } from '@voxspell/config/text-polisher-provider';
+import {
+	resolveTextPolisherProvider,
+	TextPolisherProviderConfigError,
+} from '@voxspell/config/text-polisher-provider';
 
 import type { TextPolisher } from '@voxspell/ai-polisher/text-polisher';
 import type { VoxSpellConfig } from '@voxspell/config/config-schema';
@@ -9,7 +12,15 @@ export function createTextPolisher(
 	config: VoxSpellConfig,
 	environment: NodeJS.ProcessEnv,
 ): TextPolisher | undefined {
-	const provider = resolveTextPolisherProvider(config, environment);
+	let provider: ReturnType<typeof resolveTextPolisherProvider>;
+	try {
+		provider = resolveTextPolisherProvider(config, environment);
+	} catch (error) {
+		if (!config.polishing?.enabled && error instanceof TextPolisherProviderConfigError) {
+			return undefined;
+		}
+		throw error;
+	}
 	if (!provider) return undefined;
 	return new OpenAiCompatibleTextPolisher({
 		id: provider.id,

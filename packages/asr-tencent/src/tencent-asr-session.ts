@@ -244,7 +244,7 @@ export class TencentRealtimeAsrSession implements RealtimeAsrSession {
 			.map(([, segment]) => segment)
 			.join('');
 		if (!text) {
-			this.#emitError({ type: 'error', code: 'INVALID_RESPONSE', retryable: false });
+			this.#emitError({ type: 'error', code: 'EMPTY_TRANSCRIPT', retryable: false });
 			return;
 		}
 		this.#completed = true;

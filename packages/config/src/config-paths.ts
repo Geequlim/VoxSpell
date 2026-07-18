@@ -5,6 +5,7 @@ export interface VoxSpellConfigPaths {
 	readonly directory: string;
 	readonly configFile: string;
 	readonly credentialsFile: string;
+	readonly dictionaryFile: string;
 }
 
 /** 按 XDG 约定解析主配置和凭据文件路径。 */
@@ -14,9 +15,13 @@ export function resolveVoxSpellConfigPaths(
 ): VoxSpellConfigPaths {
 	const configHome = environment.XDG_CONFIG_HOME || path.join(userHome, '.config');
 	const directory = path.join(configHome, 'voxspell');
+	const configFile = environment.VOXSPELL_CONFIG_PATH || path.join(directory, 'config.yaml');
 	return {
 		directory,
-		configFile: environment.VOXSPELL_CONFIG_PATH || path.join(directory, 'config.yaml'),
+		configFile,
 		credentialsFile: path.join(directory, 'credentials.json'),
+		dictionaryFile:
+			environment.VOXSPELL_DICTIONARY_PATH ||
+			path.join(path.dirname(configFile), 'dictionary.yaml'),
 	};
 }

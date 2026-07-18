@@ -8,6 +8,12 @@ import {
 } from '../src/daemon.js';
 import { ConfigGetRequest, ConfigUpdateRequest, ConfigValidateRequest } from '../src/config.js';
 import { CredentialsGetStatusRequest, CredentialsUpdateRequest } from '../src/credentials.js';
+import {
+	DictionaryGetRequest,
+	DictionaryReloadRequest,
+	DictionaryUpdateRequest,
+	DictionaryValidateRequest,
+} from '../src/dictionary.js';
 import { FcitxGetConfigRequest, FcitxUpdateConfigRequest } from '../src/fcitx.js';
 import { InitializeRequest } from '../src/initialize.js';
 import { ProviderTestRequest } from '../src/provider.js';
@@ -36,6 +42,10 @@ describe('JSON-RPC method descriptors', () => {
 		[ConfigUpdateRequest, 'config.update'],
 		[CredentialsGetStatusRequest, 'credentials.getStatus'],
 		[CredentialsUpdateRequest, 'credentials.update'],
+		[DictionaryGetRequest, 'dictionary.get'],
+		[DictionaryValidateRequest, 'dictionary.validate'],
+		[DictionaryUpdateRequest, 'dictionary.update'],
+		[DictionaryReloadRequest, 'dictionary.reload'],
 		[ProviderTestRequest, 'provider.test'],
 		[FcitxGetConfigRequest, 'fcitx.getConfig'],
 		[FcitxUpdateConfigRequest, 'fcitx.updateConfig'],

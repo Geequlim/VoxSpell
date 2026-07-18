@@ -1,6 +1,6 @@
 {
 	"name": "@voxspell/protocol",
-	"version": "0.0.0",
+	"version": "0.1.0",
 	"private": true,
 	"type": "module",
 	"sideEffects": false,
@@ -10,6 +10,7 @@
 		"./config": "./src/config.ts",
 		"./credentials": "./src/credentials.ts",
 		"./daemon": "./src/daemon.ts",
+		"./dictionary": "./src/dictionary.ts",
 		"./errors": "./src/errors.ts",
 		"./fcitx": "./src/fcitx.ts",
 		"./initialize": "./src/initialize.ts",

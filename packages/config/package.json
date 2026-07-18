@@ -1,6 +1,6 @@
 {
 	"name": "@voxspell/config",
-	"version": "0.0.0",
+	"version": "0.1.0",
 	"private": true,
 	"type": "module",
 	"sideEffects": false,
@@ -9,7 +9,10 @@
 		"./config-paths": "./src/config-paths.ts",
 		"./config-schema": "./src/config-schema.ts",
 		"./credentials": "./src/credentials.ts",
+		"./dictionary-schema": "./src/dictionary-schema.ts",
+		"./load-dictionary": "./src/load-dictionary.ts",
 		"./load-config": "./src/load-config.ts",
+		"./save-dictionary": "./src/save-dictionary.ts",
 		"./save-config": "./src/save-config.ts",
 		"./text-polisher-provider": "./src/text-polisher-provider.ts",
 		"./text-polishing-defaults": "./src/text-polishing-defaults.ts"

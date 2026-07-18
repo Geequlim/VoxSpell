@@ -21,6 +21,16 @@ import {
 	DaemonPingRequest,
 	DaemonPingResultSchema,
 } from '@voxspell/protocol/daemon';
+import {
+	DictionaryGetRequest,
+	DictionaryGetResultSchema,
+	DictionaryReloadRequest,
+	DictionaryReloadResultSchema,
+	DictionaryUpdateRequest,
+	DictionaryUpdateResultSchema,
+	DictionaryValidateRequest,
+	DictionaryValidateResultSchema,
+} from '@voxspell/protocol/dictionary';
 import { InitializeRequest, InitializeResultSchema } from '@voxspell/protocol/initialize';
 import { ProviderTestRequest, ProviderTestResultSchema } from '@voxspell/protocol/provider';
 import { ProtocolValidationError, validateProtocolValue } from '@voxspell/protocol/validation';
@@ -38,6 +48,8 @@ import type {
 	CredentialsUpdateParams,
 } from '@voxspell/protocol/credentials';
 import type { DaemonGetStatusResult, DaemonPingResult } from '@voxspell/protocol/daemon';
+import type { VoiceDictionary } from '@voxspell/config/dictionary-schema';
+import type { DictionaryGetResult } from '@voxspell/protocol/dictionary';
 import type { InitializeResult } from '@voxspell/protocol/initialize';
 import type { ProviderTestResult } from '@voxspell/protocol/provider';
 import type { MessageConnection } from 'vscode-jsonrpc/node';
@@ -191,6 +203,66 @@ export class DaemonRpcClient {
 				'credentials.update',
 			);
 			validateProtocolValue(CredentialsUpdateResultSchema, result);
+		} catch (error) {
+			this.#resetInvalidConnection(error);
+			throw error;
+		}
+	}
+
+	/** 读取 daemon 当前生效的用户词典和加载状态。 */
+	async getDictionary(): Promise<DictionaryGetResult> {
+		const connection = this.#requireConnection();
+		try {
+			const result = await this.#requestWithTimeout(
+				connection.sendRequest(DictionaryGetRequest, {}),
+				'dictionary.get',
+			);
+			return validateProtocolValue(DictionaryGetResultSchema, result);
+		} catch (error) {
+			this.#resetInvalidConnection(error);
+			throw error;
+		}
+	}
+
+	/** 让 daemon 校验候选用户词典，但不保存。 */
+	async validateDictionary(dictionary: VoiceDictionary): Promise<void> {
+		const connection = this.#requireConnection();
+		try {
+			const result = await this.#requestWithTimeout(
+				connection.sendRequest(DictionaryValidateRequest, { dictionary }),
+				'dictionary.validate',
+			);
+			validateProtocolValue(DictionaryValidateResultSchema, result);
+		} catch (error) {
+			this.#resetInvalidConnection(error);
+			throw error;
+		}
+	}
+
+	/** 原子保存候选用户词典并切换 daemon 快照。 */
+	async updateDictionary(dictionary: VoiceDictionary): Promise<void> {
+		const connection = this.#requireConnection();
+		try {
+			const result = await this.#requestWithTimeout(
+				connection.sendRequest(DictionaryUpdateRequest, { dictionary }),
+				'dictionary.update',
+			);
+			validateProtocolValue(DictionaryUpdateResultSchema, result);
+		} catch (error) {
+			this.#resetInvalidConnection(error);
+			throw error;
+		}
+	}
+
+	/** 让 daemon 从独立词典文件重新加载。 */
+	async reloadDictionary(): Promise<void> {
+		const connection = this.#requireConnection();
+		try {
+			const result = await this.#requestWithTimeout(
+				connection.sendRequest(DictionaryReloadRequest, {}),
+				'dictionary.reload',
+			);
+			validateProtocolValue(DictionaryReloadResultSchema, result);
 		} catch (error) {
 			this.#resetInvalidConnection(error);
 			throw error;

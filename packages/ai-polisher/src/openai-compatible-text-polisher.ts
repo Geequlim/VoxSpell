@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 
-import { composePolishSystemPrompt } from './polish-system-prompt.js';
+import { composePolishDictionaryPrompt } from './polish-system-prompt.js';
 
 import type { PolishEvent, PolishRequest, TextPolisher } from './text-polisher.js';
 
@@ -41,20 +41,17 @@ export class OpenAiCompatibleTextPolisher implements TextPolisher {
 		const requestController = new AbortController();
 		const requestSignal = AbortSignal.any([signal, requestController.signal]);
 		try {
+			const dictionaryPrompt = composePolishDictionaryPrompt(request.dictionary);
+			const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+				{ role: 'system', content: this.#systemPrompt },
+			];
+			if (dictionaryPrompt) messages.push({ role: 'system', content: dictionaryPrompt });
+			messages.push({ role: 'user', content: request.text });
 			const stream = await this.#client.chat.completions.create(
 				{
 					model: this.#model,
 					stream: true,
-					messages: [
-						{
-							role: 'system',
-							content: composePolishSystemPrompt(
-								this.#systemPrompt,
-								request.dictionary,
-							),
-						},
-						{ role: 'user', content: request.text },
-					],
+					messages,
 				},
 				{ signal: requestSignal },
 			);

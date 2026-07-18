@@ -33,6 +33,14 @@ std::string rpcErrorMessage(const glz::rpc::error &error) {
 	return message;
 }
 
+std::optional<protocol::ProtocolErrorData> rpcErrorData(
+	const glz::rpc::error &error) {
+	if (!error.data) return std::nullopt;
+	protocol::ProtocolErrorData data;
+	if (glz::read_json(data, *error.data)) return std::nullopt;
+	return data;
+}
+
 } // namespace
 
 DaemonClient::DaemonClient(
@@ -51,7 +59,7 @@ bool DaemonClient::ready() const {
 }
 
 void DaemonClient::start(std::string inputContextId) {
-	pendingInputContextId_ = std::move(inputContextId);
+	pendingStart_ = protocol::SessionStartParams{std::move(inputContextId)};
 	if (ready_) {
 		sendPendingStart();
 		return;
@@ -60,7 +68,7 @@ void DaemonClient::start(std::string inputContextId) {
 }
 
 void DaemonClient::cancelPendingStart() {
-	pendingInputContextId_.reset();
+	pendingStart_.reset();
 }
 
 void DaemonClient::finish(const std::string &sessionId) {
@@ -119,6 +127,27 @@ void DaemonClient::selectResult(
 	}
 }
 
+void DaemonClient::setPolishingEnabled(
+	const std::string &sessionId,
+	bool enabled) {
+	if (!ready_ || sessionId.empty()) {
+		return;
+	}
+
+	auto [message, inserted] =
+		rpcClient_.request<"session.setPolishingEnabled">(
+			nextRequestId(),
+			protocol::SessionSetPolishingEnabledParams{sessionId, enabled},
+			[this, sessionId](const auto &result, const auto &) {
+				if (!result) {
+					reportError(sessionId, result.error());
+				}
+			});
+	if (inserted) {
+		queue(std::move(message));
+	}
+}
+
 void DaemonClient::configureNotifications() {
 	notificationServer_.on<"daemon.ready">(
 		[](const protocol::DaemonReadyParams &) {
@@ -135,6 +164,13 @@ void DaemonClient::configureNotifications() {
 		[this](const protocol::SessionPreviewParams &params) {
 			if (callbacks_.preview) {
 				callbacks_.preview(params);
+			}
+			return protocol::EmptyObject{};
+		});
+	notificationServer_.on<"session.polishingState">(
+		[this](const protocol::SessionPolishingStateParams &params) {
+			if (callbacks_.polishingState) {
+				callbacks_.polishingState(params);
 			}
 			return protocol::EmptyObject{};
 		});
@@ -169,7 +205,7 @@ void DaemonClient::ensureConnected() {
 	const auto path = daemonSocketPath();
 	if (path.size() >= sizeof(sockaddr_un::sun_path)) {
 		if (callbacks_.error) {
-			callbacks_.error({}, "daemon socket path is too long");
+			callbacks_.error({}, "daemon socket path is too long", std::nullopt);
 		}
 		return;
 	}
@@ -177,7 +213,7 @@ void DaemonClient::ensureConnected() {
 	socketFd_ = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
 	if (socketFd_ < 0) {
 		if (callbacks_.error) {
-			callbacks_.error({}, std::strerror(errno));
+			callbacks_.error({}, std::strerror(errno), std::nullopt);
 		}
 		return;
 	}
@@ -197,7 +233,7 @@ void DaemonClient::ensureConnected() {
 		const std::string message = std::strerror(errno);
 		disconnect(false);
 		if (callbacks_.error) {
-			callbacks_.error({}, message);
+			callbacks_.error({}, message, std::nullopt);
 		}
 		return;
 	}
@@ -226,7 +262,10 @@ void DaemonClient::sendInitialize() {
 			}
 			if (result->protocolVersion != protocol::version) {
 				if (callbacks_.error) {
-					callbacks_.error({}, "unsupported daemon protocol version");
+					callbacks_.error(
+						{},
+						"unsupported daemon protocol version",
+						std::nullopt);
 				}
 				return;
 			}
@@ -242,15 +281,15 @@ void DaemonClient::sendInitialize() {
 }
 
 void DaemonClient::sendPendingStart() {
-	if (!ready_ || !pendingInputContextId_) {
+	if (!ready_ || !pendingStart_) {
 		return;
 	}
 
-	auto inputContextId = std::move(*pendingInputContextId_);
-	pendingInputContextId_.reset();
+	auto params = std::move(*pendingStart_);
+	pendingStart_.reset();
 	auto [message, inserted] = rpcClient_.request<"session.start">(
 		nextRequestId(),
-		protocol::SessionStartParams{std::move(inputContextId)},
+		std::move(params),
 		[this](const auto &result, const auto &) {
 			if (!result) {
 				reportError({}, result.error());
@@ -379,7 +418,7 @@ void DaemonClient::handleMessage(const std::string &message) {
 	if (method) {
 		const auto error = notificationServer_.call(message);
 		if (!error.empty() && callbacks_.error) {
-			callbacks_.error({}, "invalid daemon notification");
+			callbacks_.error({}, "invalid daemon notification", std::nullopt);
 		}
 		return;
 	}
@@ -390,12 +429,13 @@ void DaemonClient::handleMessage(const std::string &message) {
 		rpcClient_.get_request_map<"session.finish">().erase(id);
 		rpcClient_.get_request_map<"session.cancel">().erase(id);
 		rpcClient_.get_request_map<"session.selectResult">().erase(id);
+		rpcClient_.get_request_map<"session.setPolishingEnabled">().erase(id);
 		return;
 	}
 
 	const auto error = rpcClient_.call(message);
 	if (error && callbacks_.error) {
-		callbacks_.error({}, rpcErrorMessage(error));
+		callbacks_.error({}, rpcErrorMessage(error), rpcErrorData(error));
 	}
 }
 
@@ -403,7 +443,7 @@ void DaemonClient::reportError(
 	std::string context,
 	const glz::rpc::error &error) {
 	if (callbacks_.error) {
-		callbacks_.error(context, rpcErrorMessage(error));
+		callbacks_.error(context, rpcErrorMessage(error), rpcErrorData(error));
 	}
 }
 

@@ -55,6 +55,11 @@ struct SessionSelectResultParams {
 	std::string choiceId;
 };
 
+struct SessionSetPolishingEnabledParams {
+	std::string sessionId;
+	bool enabled = false;
+};
+
 struct DaemonReadyParams {
 	ServiceInfo serverInfo;
 	ServerCapabilities capabilities;
@@ -68,6 +73,11 @@ struct SessionPhaseParams {
 struct SessionPreviewParams {
 	std::string sessionId;
 	std::string text;
+};
+
+struct SessionPolishingStateParams {
+	std::string sessionId;
+	bool enabled = false;
 };
 
 struct TranscriptResult {
@@ -117,6 +127,10 @@ using SessionSelectResultMethod = glz::rpc::method<
 	"session.selectResult",
 	SessionSelectResultParams,
 	EmptyObject>;
+using SessionSetPolishingEnabledMethod = glz::rpc::method<
+	"session.setPolishingEnabled",
+	SessionSetPolishingEnabledParams,
+	EmptyObject>;
 
 using DaemonReadyMethod =
 	glz::rpc::method<"daemon.ready", DaemonReadyParams, EmptyObject>;
@@ -124,6 +138,10 @@ using SessionPhaseMethod =
 	glz::rpc::method<"session.phase", SessionPhaseParams, EmptyObject>;
 using SessionPreviewMethod =
 	glz::rpc::method<"session.preview", SessionPreviewParams, EmptyObject>;
+using SessionPolishingStateMethod = glz::rpc::method<
+	"session.polishingState",
+	SessionPolishingStateParams,
+	EmptyObject>;
 using SessionResultsMethod =
 	glz::rpc::method<"session.results", SessionResultsParams, EmptyObject>;
 using SessionCompletedMethod =
@@ -136,11 +154,13 @@ using RpcClient = glz::rpc::client<
 	SessionStartMethod,
 	SessionFinishMethod,
 	SessionCancelMethod,
-	SessionSelectResultMethod>;
+	SessionSelectResultMethod,
+	SessionSetPolishingEnabledMethod>;
 using NotificationServer = glz::rpc::server<
 	DaemonReadyMethod,
 	SessionPhaseMethod,
 	SessionPreviewMethod,
+	SessionPolishingStateMethod,
 	SessionResultsMethod,
 	SessionCompletedMethod,
 	SessionErrorMethod>;

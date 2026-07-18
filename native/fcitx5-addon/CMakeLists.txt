@@ -11,6 +11,7 @@ add_library(voxspell MODULE
 	src/addon.cpp
 	src/content-length-codec.cpp
 	src/daemon-client.cpp
+	src/error-presentation.cpp
 	src/status-animation.cpp
 	src/tap-hold-state.cpp
 )
@@ -52,6 +53,27 @@ if(BUILD_TESTING)
 	target_include_directories(content-length-codec-test PRIVATE src)
 	set_target_properties(content-length-codec-test PROPERTIES CXX_EXTENSIONS OFF)
 	add_test(NAME content-length-codec COMMAND content-length-codec-test)
+
+	add_executable(error-presentation-test
+		test/error-presentation-test.cpp
+		src/error-presentation.cpp
+	)
+	target_compile_features(error-presentation-test PRIVATE cxx_std_23)
+	target_include_directories(error-presentation-test PRIVATE
+		src
+		third_party/glaze/include
+	)
+	set_target_properties(error-presentation-test PROPERTIES CXX_EXTENSIONS OFF)
+	add_test(NAME error-presentation COMMAND error-presentation-test)
+
+	add_executable(config-default-test
+		test/config-default-test.cpp
+	)
+	target_compile_features(config-default-test PRIVATE cxx_std_23)
+	target_include_directories(config-default-test PRIVATE src)
+	target_link_libraries(config-default-test PRIVATE Fcitx5::Core)
+	set_target_properties(config-default-test PROPERTIES CXX_EXTENSIONS OFF)
+	add_test(NAME config-default COMMAND config-default-test)
 
 	add_executable(status-animation-test
 		test/status-animation-test.cpp

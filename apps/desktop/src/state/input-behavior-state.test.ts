@@ -8,6 +8,7 @@ const initialConfig: InputBehaviorConfig = {
 	pttKey: 'space',
 	holdThresholdMs: 200,
 	autoSelectResult: true,
+	polishingToggleKey: 'Shift_L',
 };
 
 class FakeInputBehaviorClient implements InputBehaviorClient {
@@ -16,7 +17,7 @@ class FakeInputBehaviorClient implements InputBehaviorClient {
 }
 
 describe('InputBehaviorState', () => {
-	it('loads, edits and saves the Fcitx input behavior', async () => {
+	it('loads, edits and automatically saves the Fcitx input behavior', async () => {
 		const client = new FakeInputBehaviorClient();
 		client.getInputBehavior.mockResolvedValue(initialConfig);
 		client.updateInputBehavior.mockResolvedValue();
@@ -28,30 +29,49 @@ describe('InputBehaviorState', () => {
 		state.updatePttKey('Control+space');
 		state.updateHoldThreshold(350);
 		state.updateAutoSelectResult(false);
-		expect(state.canSave).toBe(true);
-
-		await state.save();
+		state.updatePolishingToggleKey('Shift_R');
+		await state.flushPendingChanges();
 		expect(client.updateInputBehavior).toHaveBeenCalledWith({
 			pttKey: 'Control+space',
 			holdThresholdMs: 350,
 			autoSelectResult: false,
+			polishingToggleKey: 'Shift_R',
 		});
 		expect(state.phase).toBe('saved');
 		expect(state.isDirty).toBe(false);
+		state.dispose();
 	});
 
-	it('discards drafts and rejects an empty PTT key', async () => {
+	it('keeps an invalid draft without sending it to Fcitx', async () => {
 		const client = new FakeInputBehaviorClient();
 		client.getInputBehavior.mockResolvedValue(initialConfig);
 		const state = new InputBehaviorState(client);
 		await state.load();
 
-		state.updateHoldThreshold(500);
-		state.discard();
-		expect(state.holdThresholdMs).toBe(200);
 		state.updatePttKey('   ');
-		await state.save();
+		await state.flushPendingChanges();
 		expect(state.errorMessage).toBe('请设置 PTT 热键。');
 		expect(client.updateInputBehavior).not.toHaveBeenCalled();
+		expect(state.pttKey).toBe('   ');
+		state.dispose();
+	});
+
+	it('submits immediate edits without a manual save action', async () => {
+		vi.useFakeTimers();
+		const client = new FakeInputBehaviorClient();
+		client.getInputBehavior.mockResolvedValue(initialConfig);
+		client.updateInputBehavior.mockResolvedValue();
+		const state = new InputBehaviorState(client);
+		await state.load();
+
+		state.updateAutoSelectResult(false);
+		await vi.runAllTimersAsync();
+
+		expect(client.updateInputBehavior).toHaveBeenCalledWith({
+			...initialConfig,
+			autoSelectResult: false,
+		});
+		state.dispose();
+		vi.useRealTimers();
 	});
 });

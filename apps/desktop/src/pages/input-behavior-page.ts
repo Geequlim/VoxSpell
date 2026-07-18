@@ -15,7 +15,9 @@ class InputBehaviorPageView {
 	@bind.prop('subtitle', (state) => formatFcitxKeyName(state.pttKey))
 	readonly pttKeyRow: InstanceType<typeof Adw.ActionRow>;
 	@bind.sensitive((state) => state.isEditable)
-	@bind.click((state, _button, self) => showShortcutRecorder(self.root, state))
+	@bind.click((state, _button, self) =>
+		showShortcutRecorder(self.root, '设置 PTT 快捷键', false, (key) => state.updatePttKey(key)),
+	)
 	readonly recordShortcutButton: InstanceType<typeof Gtk.Button>;
 	@bind.sensitive((state) => state.isEditable && state.pttKey !== 'space')
 	@bind.click((state) => state.updatePttKey('space'))
@@ -26,6 +28,18 @@ class InputBehaviorPageView {
 	)
 	@bind.sensitive((state) => state.isEditable)
 	readonly holdThresholdRow: InstanceType<typeof Adw.SpinRow>;
+	@bind.prop('subtitle', (state) => formatFcitxKeyName(state.polishingToggleKey))
+	readonly polishingToggleKeyRow: InstanceType<typeof Adw.ActionRow>;
+	@bind.sensitive((state) => state.isEditable)
+	@bind.click((state, _button, self) =>
+		showShortcutRecorder(self.root, '设置润色切换键', true, (key) =>
+			state.updatePolishingToggleKey(key),
+		),
+	)
+	readonly recordPolishingToggleKeyButton: InstanceType<typeof Gtk.Button>;
+	@bind.sensitive((state) => state.isEditable && !state.polishingToggleKey.startsWith('Shift'))
+	@bind.click((state) => state.updatePolishingToggleKey('Shift_L'))
+	readonly resetPolishingToggleKeyButton: InstanceType<typeof Gtk.Button>;
 	@bind.prop('active', (state) => state.autoSelectResult)
 	@bind.listen<InstanceType<typeof Adw.SwitchRow>>('notify::active', (state, row) =>
 		state.updateAutoSelectResult(row.active),
@@ -35,15 +49,6 @@ class InputBehaviorPageView {
 	@bind.prop('subtitle', (state) => state.operationDescription)
 	@bind.visible((state) => Boolean(state.operationDescription))
 	readonly operationRow: InstanceType<typeof Adw.ActionRow>;
-	@bind.sensitive((state) => state.phase !== 'loading' && state.phase !== 'saving')
-	@bind.click((state) => void state.load())
-	readonly reloadButton: InstanceType<typeof Gtk.Button>;
-	@bind.sensitive((state) => state.isEditable && state.isDirty)
-	@bind.click((state) => state.discard())
-	readonly discardButton: InstanceType<typeof Gtk.Button>;
-	@bind.sensitive((state) => state.canSave)
-	@bind.click((state) => void state.save())
-	readonly saveButton: InstanceType<typeof Gtk.Button>;
 
 	constructor(
 		root: InstanceType<typeof Adw.PreferencesPage>,
@@ -51,22 +56,22 @@ class InputBehaviorPageView {
 		recordShortcutButton: InstanceType<typeof Gtk.Button>,
 		resetShortcutButton: InstanceType<typeof Gtk.Button>,
 		holdThresholdRow: InstanceType<typeof Adw.SpinRow>,
+		polishingToggleKeyRow: InstanceType<typeof Adw.ActionRow>,
+		recordPolishingToggleKeyButton: InstanceType<typeof Gtk.Button>,
+		resetPolishingToggleKeyButton: InstanceType<typeof Gtk.Button>,
 		autoSelectRow: InstanceType<typeof Adw.SwitchRow>,
 		operationRow: InstanceType<typeof Adw.ActionRow>,
-		reloadButton: InstanceType<typeof Gtk.Button>,
-		discardButton: InstanceType<typeof Gtk.Button>,
-		saveButton: InstanceType<typeof Gtk.Button>,
 	) {
 		this.root = root;
 		this.pttKeyRow = pttKeyRow;
 		this.recordShortcutButton = recordShortcutButton;
 		this.resetShortcutButton = resetShortcutButton;
 		this.holdThresholdRow = holdThresholdRow;
+		this.polishingToggleKeyRow = polishingToggleKeyRow;
+		this.recordPolishingToggleKeyButton = recordPolishingToggleKeyButton;
+		this.resetPolishingToggleKeyButton = resetPolishingToggleKeyButton;
 		this.autoSelectRow = autoSelectRow;
 		this.operationRow = operationRow;
-		this.reloadButton = reloadButton;
-		this.discardButton = discardButton;
-		this.saveButton = saveButton;
 	}
 }
 
@@ -112,6 +117,25 @@ export function createInputBehaviorPage(
 	triggerGroup.add(pttKeyRow);
 	triggerGroup.add(holdThresholdRow);
 
+	const polishingToggleKeyRow = new Adw.ActionRow({ title: '润色切换键' });
+	const resetPolishingToggleKeyButton = new Gtk.Button({
+		label: '恢复默认',
+		valign: Gtk.Align.CENTER,
+	});
+	const recordPolishingToggleKeyButton = new Gtk.Button({
+		label: '设置按键',
+		valign: Gtk.Align.CENTER,
+	});
+	const polishingToggleButtonBox = new Gtk.Box({
+		orientation: Gtk.Orientation.HORIZONTAL,
+		spacing: 8,
+	});
+	polishingToggleButtonBox.append(resetPolishingToggleKeyButton);
+	polishingToggleButtonBox.append(recordPolishingToggleKeyButton);
+	polishingToggleKeyRow.addSuffix(polishingToggleButtonBox);
+	const polishingGroup = new Adw.PreferencesGroup({ title: '录音中切换润色' });
+	polishingGroup.add(polishingToggleKeyRow);
+
 	const autoSelectRow = new Adw.SwitchRow({
 		title: '自动选择推荐结果',
 		subtitle: '润色可用时自动提交润色结果，否则提交原始识别结果。',
@@ -119,26 +143,13 @@ export function createInputBehaviorPage(
 	const resultGroup = new Adw.PreferencesGroup({ title: '结果选择' });
 	resultGroup.add(autoSelectRow);
 
-	const operationRow = new Adw.ActionRow({ title: '状态', subtitle: '' });
-	const reloadButton = new Gtk.Button({ label: '重新加载', valign: Gtk.Align.CENTER });
-	const discardButton = new Gtk.Button({ label: '撤销', valign: Gtk.Align.CENTER });
-	const saveButton = new Gtk.Button({
-		label: '保存',
-		valign: Gtk.Align.CENTER,
-		cssClasses: ['suggested-action'],
-	});
-	const buttonBox = new Gtk.Box({ orientation: Gtk.Orientation.HORIZONTAL, spacing: 8 });
-	buttonBox.append(reloadButton);
-	buttonBox.append(discardButton);
-	buttonBox.append(saveButton);
-	const actionRow = new Adw.ActionRow({ title: '保存更改' });
-	actionRow.addSuffix(buttonBox);
+	const operationRow = new Adw.ActionRow({ title: '自动保存', subtitle: '' });
 	const actionGroup = new Adw.PreferencesGroup();
 	actionGroup.add(operationRow);
-	actionGroup.add(actionRow);
 
 	const root = new Adw.PreferencesPage({ title: '输入行为' });
 	root.add(triggerGroup);
+	root.add(polishingGroup);
 	root.add(resultGroup);
 	root.add(actionGroup);
 	const view = new InputBehaviorPageView(
@@ -147,11 +158,11 @@ export function createInputBehaviorPage(
 		recordShortcutButton,
 		resetShortcutButton,
 		holdThresholdRow,
+		polishingToggleKeyRow,
+		recordPolishingToggleKeyButton,
+		resetPolishingToggleKeyButton,
 		autoSelectRow,
 		operationRow,
-		reloadButton,
-		discardButton,
-		saveButton,
 	);
 	view.state = state;
 	return root;
@@ -159,7 +170,9 @@ export function createInputBehaviorPage(
 
 function showShortcutRecorder(
 	parent: InstanceType<typeof Gtk.Widget>,
-	state: InputBehaviorState,
+	heading: string,
+	allowModifierOnly: boolean,
+	update: (key: string) => void,
 ): void {
 	const hint = new Gtk.Label({
 		label: '等待按键…',
@@ -168,8 +181,10 @@ function showShortcutRecorder(
 		marginBottom: 12,
 	});
 	const dialog = new Adw.AlertDialog({
-		heading: '设置 PTT 快捷键',
-		body: '按下一个按键或组合键。修饰键需要与其他按键组合，按 Escape 取消。',
+		heading,
+		body: allowModifierOnly
+			? '按下一个按键，按 Escape 取消。'
+			: '按下一个按键或组合键。修饰键需要与其他按键组合，按 Escape 取消。',
 		extraChild: hint,
 		closeResponse: 'cancel',
 	});
@@ -184,9 +199,10 @@ function showShortcutRecorder(
 		}
 		const keyName = Gdk.keyvalName(keyval);
 		if (!keyName) return true;
-		const shortcut = createFcitxKeyName(keyName, getFcitxModifiers(modifierState));
+		let shortcut = createFcitxKeyName(keyName, getFcitxModifiers(modifierState));
+		if (allowModifierOnly && /_(?:L|R)$/.test(keyName)) shortcut = keyName;
 		if (!shortcut) return true;
-		state.updatePttKey(shortcut);
+		update(shortcut);
 		dialog.close();
 		return true;
 	});

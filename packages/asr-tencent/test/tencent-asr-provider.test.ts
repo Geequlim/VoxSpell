@@ -92,6 +92,31 @@ describe('TencentRealtimeAsrProvider', () => {
 			await closeServer(server);
 		}
 	});
+
+	it('distinguishes an empty final transcript from a malformed response', async () => {
+		const server = await createServer((socket) => {
+			socket.send(JSON.stringify({ code: 0, message: 'success', voice_id: 'voice-4' }));
+			socket.on('message', (data, isBinary) => {
+				if (isBinary || JSON.parse(data.toString()).type !== 'end') return;
+				socket.send(
+					JSON.stringify({ code: 0, message: 'success', voice_id: 'voice-4', final: 1 }),
+				);
+			});
+		});
+
+		try {
+			const session = await createSession(server);
+			await session.start(new AbortController().signal);
+			const events = collectEvents(session);
+			await session.finish();
+			expect(await events).toEqual([
+				{ type: 'ready' },
+				{ type: 'error', code: 'EMPTY_TRANSCRIPT', retryable: false },
+			]);
+		} finally {
+			await closeServer(server);
+		}
+	});
 });
 
 async function createServer(onConnection: (socket: WebSocket) => void): Promise<WebSocketServer> {

@@ -66,6 +66,7 @@ describe('DaemonRpcClient', () => {
 	it('initializes and reads health and configuration status', async () => {
 		const updatedConfigs: unknown[] = [];
 		const updatedCredentials: unknown[] = [];
+		const updatedDictionaries: unknown[] = [];
 		const testServer = await createTestServer((connection) => {
 			connection.onRequest('initialize', () => ({
 				protocolVersion: 1,
@@ -107,6 +108,18 @@ describe('DaemonRpcClient', () => {
 				return null;
 			});
 			connection.onRequest('provider.test', () => ({ latencyMs: 18, partialResults: false }));
+			connection.onRequest('dictionary.get', () => ({
+				dictionary: { version: 1, entries: [] },
+				path: '/tmp/dictionary.yaml',
+				enabledCount: 0,
+				promptCharacters: 0,
+			}));
+			connection.onRequest('dictionary.validate', () => null);
+			connection.onRequest('dictionary.update', (params) => {
+				updatedDictionaries.push(params);
+				return null;
+			});
+			connection.onRequest('dictionary.reload', () => null);
 		});
 		const client = new DaemonRpcClient({ socketPath: testServer.socketPath });
 
@@ -135,6 +148,14 @@ describe('DaemonRpcClient', () => {
 			latencyMs: 18,
 			partialResults: false,
 		});
+		const dictionaryState = await client.getDictionary();
+		expect(dictionaryState.path).toBe('/tmp/dictionary.yaml');
+		await expect(
+			client.validateDictionary(dictionaryState.dictionary),
+		).resolves.toBeUndefined();
+		await expect(client.updateDictionary(dictionaryState.dictionary)).resolves.toBeUndefined();
+		await expect(client.reloadDictionary()).resolves.toBeUndefined();
+		expect(updatedDictionaries).toHaveLength(1);
 		client.dispose();
 	});
 

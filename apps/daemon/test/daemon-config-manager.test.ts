@@ -36,6 +36,7 @@ async function createPaths(): Promise<VoxSpellConfigPaths> {
 		directory,
 		configFile: path.join(directory, 'config.yaml'),
 		credentialsFile: path.join(directory, 'credentials.json'),
+		dictionaryFile: path.join(directory, 'dictionary.yaml'),
 	};
 }
 
@@ -78,6 +79,23 @@ describe('DaemonConfigManager', () => {
 			activeProvider: 'fake-asr',
 			missingCredentialNames: [],
 		});
+	});
+
+	it('provides daemon-owned text processing options for new sessions', async () => {
+		const paths = await createPaths();
+		const config: VoxSpellConfig = {
+			...validConfig,
+			textProcessing: { trimTrailingPeriod: true },
+		};
+		await saveVoxSpellConfig(paths.directory, paths.configFile, config);
+		const manager = new DaemonConfigManager({
+			paths,
+			environment: { OPENROUTER_API_KEY: 'secret' },
+		});
+
+		await manager.initialize();
+
+		expect(manager.getTrimTrailingPeriod()).toBe(true);
 	});
 
 	it('activates a valid pending config when its missing credentials are supplied', async () => {

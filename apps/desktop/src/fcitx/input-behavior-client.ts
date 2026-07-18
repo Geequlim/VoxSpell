@@ -12,6 +12,7 @@ export interface InputBehaviorConfig {
 	readonly pttKey: string;
 	readonly holdThresholdMs: number;
 	readonly autoSelectResult: boolean;
+	readonly polishingToggleKey: string;
 }
 
 /** 通过 Fcitx Controller D-Bus 读取和更新 VoxSpell addon 配置。 */
@@ -34,6 +35,7 @@ export class FcitxInputBehaviorClient {
 			PTTKey: config.pttKey,
 			HoldThresholdMs: String(config.holdThresholdMs),
 			AutoSelectResult: config.autoSelectResult ? 'True' : 'False',
+			PolishingToggleKey: config.polishingToggleKey,
 		});
 		await this.#call(
 			'SetConfig',
@@ -85,13 +87,19 @@ function parseInputBehavior(values: InstanceType<typeof GLib.Variant>): InputBeh
 	const pttKey = readString(values, 'PTTKey');
 	const holdThresholdMs = Number(readString(values, 'HoldThresholdMs'));
 	const autoSelectResult = readString(values, 'AutoSelectResult');
+	const polishingToggleKey = readString(values, 'PolishingToggleKey');
 	if (!Number.isInteger(holdThresholdMs) || holdThresholdMs < 100 || holdThresholdMs > 2_000) {
 		throw new Error('Fcitx 返回了无效的长按阈值');
 	}
 	if (autoSelectResult !== 'True' && autoSelectResult !== 'False') {
 		throw new Error('Fcitx 返回了无效的结果选择模式');
 	}
-	return { pttKey, holdThresholdMs, autoSelectResult: autoSelectResult === 'True' };
+	return {
+		pttKey,
+		holdThresholdMs,
+		autoSelectResult: autoSelectResult === 'True',
+		polishingToggleKey,
+	};
 }
 
 function readString(values: InstanceType<typeof GLib.Variant>, key: string): string {

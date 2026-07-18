@@ -70,8 +70,10 @@ function validatePolishingConfig(config: NonNullable<VoxSpellConfig['polishing']
 		}
 		providerIds.add(provider.id);
 	}
-	if (!config.enabled) return;
-	if (!config.activeProvider || !providerIds.has(config.activeProvider)) {
+	if (config.activeProvider && !providerIds.has(config.activeProvider)) {
+		throw new VoxSpellConfigError('Active text polisher provider does not exist');
+	}
+	if (config.enabled && !config.activeProvider) {
 		throw new VoxSpellConfigError('Active text polisher provider does not exist');
 	}
 }

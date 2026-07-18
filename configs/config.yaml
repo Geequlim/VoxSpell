@@ -1,6 +1,6 @@
 version: 1
 asr:
-  activeProvider: tencent
+  activeProvider: glm
   providers:
     - id: openrouter
       type: openai-compatible-transcription
@@ -15,8 +15,11 @@ asr:
     - id: tencent
       type: tencent-realtime
       engineModelType: 16k_zh
+textProcessing:
+  trimTrailingPeriod: true
 polishing:
   enabled: true
+  minimumEffectiveCharacters: 6
   activeProvider: openai
   systemPrompt: |-
     你是语音输入文本润色器。
@@ -27,7 +30,7 @@ polishing:
     严格使用语音词典中的标准写法。
 
     只返回润色后的完整文本。
-    不要解释，不要添加标题、引号、Markdown、代码块或任何其他内容。
+    不要解释，不要添加标题、Markdown、代码块或任何其他内容。
   providers:
     - id: openai
       type: openai-compatible-chat

@@ -19,6 +19,12 @@ class AiPolishingPageView {
 	)
 	@bind.sensitive((state) => state.isEditable)
 	readonly enabledRow: InstanceType<typeof Adw.SwitchRow>;
+	@bind.prop('value', (state) => state.polishingMinimumEffectiveCharacters)
+	@bind.listen<InstanceType<typeof Adw.SpinRow>>('notify::value', (state, row) =>
+		state.updatePolishingMinimumEffectiveCharacters(Math.round(row.value)),
+	)
+	@bind.sensitive((state) => state.isEditable)
+	readonly minimumCharactersRow: InstanceType<typeof Adw.SpinRow>;
 	@bind.prop('text', (state) => state.polishingBaseUrl)
 	@bind.prop('title', (state) => getFieldTitle('API 地址', state.fieldErrors.polishingBaseUrl))
 	@bind.listen<InstanceType<typeof Adw.EntryRow>>('changed', (state, row) =>
@@ -46,8 +52,15 @@ class AiPolishingPageView {
 	@bind.listen<InstanceType<typeof Adw.PasswordEntryRow>>('changed', (state, row) =>
 		state.updatePolishingCredential(row.text),
 	)
+	@bind.listen<InstanceType<typeof Adw.PasswordEntryRow>>('entry-activated', (state) =>
+		state.commitPolishingCredential(),
+	)
 	@bind.sensitive((state) => state.isEditable)
 	readonly credentialRow: InstanceType<typeof Adw.PasswordEntryRow>;
+	@bind.listen<InstanceType<typeof Gtk.EventControllerFocus>>('leave', (state) =>
+		state.commitPolishingCredential(),
+	)
+	readonly credentialFocusController: InstanceType<typeof Gtk.EventControllerFocus>;
 	@bind.prop('subtitle', (state) => state.polishingCredentialStatus)
 	readonly credentialStatusRow: InstanceType<typeof Adw.ActionRow>;
 	@bind.render<InstanceType<typeof Gtk.TextBuffer>>((state, buffer, self) => {
@@ -73,48 +86,37 @@ class AiPolishingPageView {
 	readonly operationRow: InstanceType<typeof Adw.ActionRow>;
 	@bind.visible((state) => state.phase === 'error')
 	readonly operationErrorIcon: InstanceType<typeof Gtk.Image>;
-	@bind.sensitive((state) => state.isEditable && state.isDirty && state.phase !== 'saving')
-	@bind.click((state) => state.discard())
-	readonly discardButton: InstanceType<typeof Gtk.Button>;
-	@bind.sensitive((state) => state.canReload)
-	@bind.click((state) => void state.load())
-	readonly reloadButton: InstanceType<typeof Gtk.Button>;
-	@bind.sensitive((state) => state.canSave)
-	@bind.click((state) => void state.save())
-	readonly saveButton: InstanceType<typeof Gtk.Button>;
 
 	constructor(
 		root: InstanceType<typeof Adw.PreferencesPage>,
 		enabledRow: InstanceType<typeof Adw.SwitchRow>,
+		minimumCharactersRow: InstanceType<typeof Adw.SpinRow>,
 		baseUrlRow: InstanceType<typeof Adw.EntryRow>,
 		modelRow: InstanceType<typeof Adw.EntryRow>,
 		apiKeyEnvironmentRow: InstanceType<typeof Adw.EntryRow>,
 		credentialRow: InstanceType<typeof Adw.PasswordEntryRow>,
+		credentialFocusController: InstanceType<typeof Gtk.EventControllerFocus>,
 		credentialStatusRow: InstanceType<typeof Adw.ActionRow>,
 		promptBuffer: InstanceType<typeof Gtk.TextBuffer>,
 		promptActionRow: InstanceType<typeof Adw.ActionRow>,
 		resetPromptButton: InstanceType<typeof Gtk.Button>,
 		operationRow: InstanceType<typeof Adw.ActionRow>,
 		operationErrorIcon: InstanceType<typeof Gtk.Image>,
-		discardButton: InstanceType<typeof Gtk.Button>,
-		reloadButton: InstanceType<typeof Gtk.Button>,
-		saveButton: InstanceType<typeof Gtk.Button>,
 	) {
 		this.root = root;
 		this.enabledRow = enabledRow;
+		this.minimumCharactersRow = minimumCharactersRow;
 		this.baseUrlRow = baseUrlRow;
 		this.modelRow = modelRow;
 		this.apiKeyEnvironmentRow = apiKeyEnvironmentRow;
 		this.credentialRow = credentialRow;
+		this.credentialFocusController = credentialFocusController;
 		this.credentialStatusRow = credentialStatusRow;
 		this.promptBuffer = promptBuffer;
 		this.promptActionRow = promptActionRow;
 		this.resetPromptButton = resetPromptButton;
 		this.operationRow = operationRow;
 		this.operationErrorIcon = operationErrorIcon;
-		this.discardButton = discardButton;
-		this.reloadButton = reloadButton;
-		this.saveButton = saveButton;
 	}
 }
 
@@ -123,8 +125,21 @@ export function createAiPolishingPage(
 	state: ConfigState,
 ): InstanceType<typeof Adw.PreferencesPage> {
 	const enabledRow = new Adw.SwitchRow({
-		title: '启用 AI 润色',
+		title: '默认启用 AI 润色',
 		subtitle: '识别完成后生成一份可回退的流式润色结果。',
+	});
+	const minimumCharactersRow = new Adw.SpinRow({
+		title: '最少润色字符数',
+		subtitle: '少于该数量时自动跳过；0 表示不限制。',
+		adjustment: new Gtk.Adjustment({
+			lower: 0,
+			upper: 200,
+			stepIncrement: 1,
+			pageIncrement: 10,
+			value: 0,
+		}),
+		digits: 0,
+		numeric: true,
 	});
 	const baseUrlRow = createFormEntryRow('API 地址');
 	const modelRow = createFormEntryRow('模型');
@@ -134,11 +149,14 @@ export function createAiPolishingPage(
 		description: '首期使用 OpenAI-compatible Chat Completions 流式接口。',
 	});
 	providerGroup.add(enabledRow);
+	providerGroup.add(minimumCharactersRow);
 	providerGroup.add(baseUrlRow);
 	providerGroup.add(modelRow);
 	providerGroup.add(apiKeyEnvironmentRow);
 
 	const credentialRow = createFormPasswordEntryRow('更新凭据');
+	const credentialFocusController = new Gtk.EventControllerFocus();
+	credentialRow.addController(credentialFocusController);
 	const credentialStatusRow = new Adw.ActionRow({ title: '凭据状态', subtitle: '' });
 	const credentialGroup = new Adw.PreferencesGroup({
 		title: '凭据',
@@ -187,24 +205,10 @@ export function createAiPolishingPage(
 		iconName: 'dialog-error-symbolic',
 		cssClasses: ['error'],
 	});
-	const operationRow = new Adw.ActionRow({ title: '状态', subtitle: '' });
+	const operationRow = new Adw.ActionRow({ title: '自动保存', subtitle: '' });
 	operationRow.addPrefix(operationErrorIcon);
-	const reloadButton = new Gtk.Button({ label: '重新加载', valign: Gtk.Align.CENTER });
-	const discardButton = new Gtk.Button({ label: '撤销', valign: Gtk.Align.CENTER });
-	const saveButton = new Gtk.Button({
-		label: '保存',
-		valign: Gtk.Align.CENTER,
-		cssClasses: ['suggested-action'],
-	});
-	const buttonBox = new Gtk.Box({ orientation: Gtk.Orientation.HORIZONTAL, spacing: 8 });
-	buttonBox.append(reloadButton);
-	buttonBox.append(discardButton);
-	buttonBox.append(saveButton);
-	const actionRow = new Adw.ActionRow({ title: '保存更改' });
-	actionRow.addSuffix(buttonBox);
 	const actionGroup = new Adw.PreferencesGroup();
 	actionGroup.add(operationRow);
-	actionGroup.add(actionRow);
 
 	const root = new Adw.PreferencesPage({ title: 'AI 润色' });
 	root.add(providerGroup);
@@ -214,19 +218,18 @@ export function createAiPolishingPage(
 	const view = new AiPolishingPageView(
 		root,
 		enabledRow,
+		minimumCharactersRow,
 		baseUrlRow,
 		modelRow,
 		apiKeyEnvironmentRow,
 		credentialRow,
+		credentialFocusController,
 		credentialStatusRow,
 		promptBuffer,
 		promptActionRow,
 		resetPromptButton,
 		operationRow,
 		operationErrorIcon,
-		discardButton,
-		reloadButton,
-		saveButton,
 	);
 	view.state = state;
 	return root;

@@ -30,6 +30,20 @@ import {
 	CredentialsUpdateRequest,
 	CredentialsUpdateResultSchema,
 } from '@voxspell/protocol/credentials';
+import {
+	DictionaryGetParamsSchema,
+	DictionaryGetRequest,
+	DictionaryGetResultSchema,
+	DictionaryReloadParamsSchema,
+	DictionaryReloadRequest,
+	DictionaryReloadResultSchema,
+	DictionaryUpdateParamsSchema,
+	DictionaryUpdateRequest,
+	DictionaryUpdateResultSchema,
+	DictionaryValidateParamsSchema,
+	DictionaryValidateRequest,
+	DictionaryValidateResultSchema,
+} from '@voxspell/protocol/dictionary';
 import { PROTOCOL_VERSION } from '@voxspell/protocol/common';
 import { DAEMON_ERROR_CODE } from '@voxspell/protocol/errors';
 import {
@@ -50,6 +64,8 @@ import {
 	SessionParamsSchema,
 	SessionPhaseNotification,
 	SessionPhaseParamsSchema,
+	SessionPolishingStateNotification,
+	SessionPolishingStateParamsSchema,
 	SessionPreviewNotification,
 	SessionPreviewParamsSchema,
 	SessionResultsNotification,
@@ -57,6 +73,8 @@ import {
 	SessionSelectResultParamsSchema,
 	SessionSelectResultRequest,
 	SessionSelectResultResultSchema,
+	SessionSetPolishingEnabledParamsSchema,
+	SessionSetPolishingEnabledRequest,
 	SessionStartParamsSchema,
 	SessionStartRequest,
 	SessionStartResultSchema,
@@ -81,6 +99,7 @@ import { SessionCoordinatorError } from '../session-coordinator.js';
 import { AsrProviderConfigError } from '@voxspell/config/asr-provider';
 import { VoxSpellCredentialsError } from '@voxspell/config/credentials';
 import { VoxSpellConfigError, VoxSpellConfigNotFoundError } from '@voxspell/config/load-config';
+import { VoiceDictionaryError } from '@voxspell/config/load-dictionary';
 import { FcitxUnavailableError } from '../fcitx/fcitx-config-client.js';
 import { AsrProviderTestError } from '../asr/test-asr-provider.js';
 
@@ -89,6 +108,8 @@ import type { ServiceInfo } from '@voxspell/protocol/common';
 import type { ProtocolErrorData } from '@voxspell/protocol/errors';
 import type { VoxSpellConfig } from '@voxspell/config/config-schema';
 import type { CredentialValueUpdate } from '@voxspell/protocol/credentials';
+import type { VoiceDictionary } from '@voxspell/config/dictionary-schema';
+import type { DictionaryGetResult } from '@voxspell/protocol/dictionary';
 import type { DaemonGetStatusResult } from '@voxspell/protocol/daemon';
 import type { VoxSpellFcitxConfig } from '@voxspell/protocol/fcitx';
 import type { DaemonSessionEvent, SessionCoordinator } from '../session-coordinator.js';
@@ -103,6 +124,7 @@ export interface DaemonRpcConnectionOptions {
 		publish: (event: DaemonSessionEvent) => void,
 	) => SessionCoordinator;
 	readonly configuration: DaemonConfigurationRpcService;
+	readonly dictionary: DaemonDictionaryRpcService;
 	readonly fcitx: FcitxConfigurationRpcService;
 	readonly now?: () => number;
 }
@@ -126,6 +148,14 @@ export interface DaemonConfigurationRpcService {
 		deletedNames: readonly string[],
 	): Promise<void>;
 	testProvider(providerId: string): Promise<ProviderTestResult>;
+}
+
+/** 描述语音词典 RPC 对 daemon 运行时所需的最小能力。 */
+export interface DaemonDictionaryRpcService {
+	getState(): DictionaryGetResult;
+	validate(dictionary: VoiceDictionary): Promise<void>;
+	update(dictionary: VoiceDictionary): Promise<void>;
+	reload(): Promise<void>;
 }
 
 /** 将 TypeBox 入站校验失败转换为不回显原始参数的 JSON-RPC 错误。 */
@@ -167,6 +197,7 @@ export class DaemonRpcConnection {
 	readonly #capabilities: ServerCapabilities;
 	readonly #coordinator: SessionCoordinator;
 	readonly #configuration: DaemonConfigurationRpcService;
+	readonly #dictionary: DaemonDictionaryRpcService;
 	readonly #fcitx: FcitxConfigurationRpcService;
 	readonly #now: () => number;
 	#initialized = false;
@@ -178,6 +209,7 @@ export class DaemonRpcConnection {
 		this.#serverInfo = options.serverInfo;
 		this.#capabilities = options.capabilities;
 		this.#configuration = options.configuration;
+		this.#dictionary = options.dictionary;
 		this.#fcitx = options.fcitx;
 		this.#now = options.now ?? Date.now;
 		this.#coordinator = options.createSessionCoordinator((event) => {
@@ -246,6 +278,17 @@ export class DaemonRpcConnection {
 				this.#coordinator.start(params.inputContextId),
 			);
 			return validateOutbound(() => validateProtocolValue(SessionStartResultSchema, result));
+		});
+
+		this.#connection.onRequest(SessionSetPolishingEnabledRequest, async (rawParams) => {
+			this.#ensureInitialized();
+			const params = validateInbound(() =>
+				validateProtocolValue(SessionSetPolishingEnabledParamsSchema, rawParams),
+			);
+			await this.#runSessionOperation(async () =>
+				this.#coordinator.setPolishingEnabled(params.sessionId, params.enabled),
+			);
+			return validateOutbound(() => validateProtocolValue(SessionFinishResultSchema, null));
 		});
 
 		this.#connection.onRequest(SessionFinishRequest, async (rawParams) => {
@@ -360,6 +403,57 @@ export class DaemonRpcConnection {
 			);
 		});
 
+		this.#connection.onRequest(DictionaryGetRequest, (rawParams) => {
+			this.#ensureInitialized();
+			validateInbound(() => validateProtocolValue(DictionaryGetParamsSchema, rawParams));
+			return validateOutbound(() =>
+				validateProtocolValue(DictionaryGetResultSchema, this.#dictionary.getState()),
+			);
+		});
+
+		this.#connection.onRequest(DictionaryValidateRequest, async (rawParams) => {
+			this.#ensureInitialized();
+			const params = validateInbound(() =>
+				validateProtocolValue(DictionaryValidateParamsSchema, rawParams),
+			);
+			try {
+				await this.#dictionary.validate(params.dictionary);
+			} catch (error) {
+				throw this.#createDictionaryError(error);
+			}
+			return validateOutbound(() =>
+				validateProtocolValue(DictionaryValidateResultSchema, null),
+			);
+		});
+
+		this.#connection.onRequest(DictionaryUpdateRequest, async (rawParams) => {
+			this.#ensureInitialized();
+			const params = validateInbound(() =>
+				validateProtocolValue(DictionaryUpdateParamsSchema, rawParams),
+			);
+			try {
+				await this.#dictionary.update(params.dictionary);
+			} catch (error) {
+				throw this.#createDictionaryError(error);
+			}
+			return validateOutbound(() =>
+				validateProtocolValue(DictionaryUpdateResultSchema, null),
+			);
+		});
+
+		this.#connection.onRequest(DictionaryReloadRequest, async (rawParams) => {
+			this.#ensureInitialized();
+			validateInbound(() => validateProtocolValue(DictionaryReloadParamsSchema, rawParams));
+			try {
+				await this.#dictionary.reload();
+			} catch (error) {
+				throw this.#createDictionaryError(error);
+			}
+			return validateOutbound(() =>
+				validateProtocolValue(DictionaryReloadResultSchema, null),
+			);
+		});
+
 		this.#connection.onRequest(ProviderTestRequest, async (rawParams) => {
 			this.#ensureInitialized();
 			const params = validateInbound(() =>
@@ -455,6 +549,18 @@ export class DaemonRpcConnection {
 		});
 	}
 
+	#createDictionaryError(error: unknown): ResponseError<ProtocolErrorData> {
+		const code =
+			error instanceof VoiceDictionaryError
+				? 'DICTIONARY_INVALID'
+				: 'DICTIONARY_APPLY_FAILED';
+		return new ResponseError(DAEMON_ERROR_CODE, 'Voice dictionary operation failed', {
+			code,
+			stage: 'dictionary',
+			retryable: false,
+		});
+	}
+
 	#createFcitxError(error: unknown): ResponseError<ProtocolErrorData> {
 		const code =
 			error instanceof FcitxUnavailableError ? 'FCITX_UNAVAILABLE' : 'FCITX_CONFIG_FAILED';
@@ -498,6 +604,13 @@ export class DaemonRpcConnection {
 					SessionPreviewNotification,
 					validateOutbound(() =>
 						validateProtocolValue(SessionPreviewParamsSchema, event.params),
+					),
+				);
+			case 'session.polishingState':
+				return this.#connection.sendNotification(
+					SessionPolishingStateNotification,
+					validateOutbound(() =>
+						validateProtocolValue(SessionPolishingStateParamsSchema, event.params),
 					),
 				);
 			case 'session.results':

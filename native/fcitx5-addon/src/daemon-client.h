@@ -20,10 +20,14 @@ public:
 		std::function<void(const std::string &)> started;
 		std::function<void(const protocol::SessionPhaseParams &)> phase;
 		std::function<void(const protocol::SessionPreviewParams &)> preview;
+		std::function<void(const protocol::SessionPolishingStateParams &)> polishingState;
 		std::function<void(const protocol::SessionResultsParams &)> results;
 		std::function<void(const protocol::SessionCompletedParams &)> completed;
 		std::function<void(const protocol::SessionErrorParams &)> sessionError;
-		std::function<void(const std::string &, const std::string &)> error;
+		std::function<void(
+			const std::string &,
+			const std::string &,
+			const std::optional<protocol::ProtocolErrorData> &)> error;
 		std::function<void()> disconnected;
 	};
 
@@ -39,6 +43,7 @@ public:
 	void finish(const std::string &sessionId);
 	void cancel(const std::string &sessionId, std::string reason);
 	void selectResult(const std::string &sessionId, std::string choiceId);
+	void setPolishingEnabled(const std::string &sessionId, bool enabled);
 
 private:
 	enum class ConnectionState {
@@ -72,7 +77,7 @@ private:
 	std::size_t outputOffset_ = 0;
 	std::int64_t requestId_ = 0;
 	bool ready_ = false;
-	std::optional<std::string> pendingInputContextId_;
+	std::optional<protocol::SessionStartParams> pendingStart_;
 	protocol::RpcClient rpcClient_;
 	protocol::NotificationServer notificationServer_;
 };

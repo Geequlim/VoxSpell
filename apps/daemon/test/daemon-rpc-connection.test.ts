@@ -14,6 +14,12 @@ import {
 	CredentialsGetStatusRequest,
 	CredentialsUpdateRequest,
 } from '@voxspell/protocol/credentials';
+import {
+	DictionaryGetRequest,
+	DictionaryReloadRequest,
+	DictionaryUpdateRequest,
+	DictionaryValidateRequest,
+} from '@voxspell/protocol/dictionary';
 import { FcitxGetConfigRequest, FcitxUpdateConfigRequest } from '@voxspell/protocol/fcitx';
 import { DAEMON_ERROR_CODE } from '@voxspell/protocol/errors';
 import { InitializeRequest } from '@voxspell/protocol/initialize';
@@ -84,6 +90,9 @@ interface RpcTestContext {
 	readonly validateConfig: ReturnType<typeof vi.fn>;
 	readonly updateConfig: ReturnType<typeof vi.fn>;
 	readonly updateCredentialEntries: ReturnType<typeof vi.fn>;
+	readonly validateDictionary: ReturnType<typeof vi.fn>;
+	readonly updateDictionary: ReturnType<typeof vi.fn>;
+	readonly reloadDictionary: ReturnType<typeof vi.fn>;
 	readonly testProvider: ReturnType<typeof vi.fn>;
 	readonly updateFcitxConfig: ReturnType<typeof vi.fn>;
 }
@@ -105,6 +114,9 @@ function createTestContext(options: TestContextOptions = { fragmentSize: 3 }): R
 	const validateConfig = vi.fn(async () => undefined);
 	const updateConfig = vi.fn(async () => undefined);
 	const updateCredentialEntries = vi.fn(async () => undefined);
+	const validateDictionary = vi.fn(async () => undefined);
+	const updateDictionary = vi.fn(async () => undefined);
+	const reloadDictionary = vi.fn(async () => undefined);
 	const testProvider = vi.fn(async () => ({ latencyMs: 25, partialResults: false }));
 	const updateFcitxConfig = vi.fn(async () => undefined);
 	const configuration = {
@@ -122,16 +134,29 @@ function createTestContext(options: TestContextOptions = { fragmentSize: 3 }): R
 		updateCredentialEntries,
 		testProvider,
 	};
+	const dictionary = {
+		getState: () => ({
+			dictionary: { version: 1 as const, entries: [] },
+			path: '/tmp/voxspell/dictionary.yaml',
+			enabledCount: 0,
+			promptCharacters: 0,
+		}),
+		validate: validateDictionary,
+		update: updateDictionary,
+		reload: reloadDictionary,
+	};
 	const server = new DaemonRpcConnection({
 		connection: pair.server,
 		serverInfo: { name: 'voxspell-daemon', version: '0.0.0' },
 		capabilities: { partialTranscript: true, polishPreview: false },
 		configuration,
+		dictionary,
 		fcitx: {
 			getConfig: async () => ({
 				pttKey: 'space',
 				holdThresholdMs: 200,
 				autoSelectResult: true,
+				polishingToggleKey: 'Shift_L',
 			}),
 			updateConfig: updateFcitxConfig,
 		},
@@ -177,6 +202,9 @@ function createTestContext(options: TestContextOptions = { fragmentSize: 3 }): R
 		validateConfig,
 		updateConfig,
 		updateCredentialEntries,
+		validateDictionary,
+		updateDictionary,
+		reloadDictionary,
 		testProvider,
 		updateFcitxConfig,
 	};
@@ -317,10 +345,16 @@ describe('DaemonRpcConnection', () => {
 			pttKey: 'space',
 			holdThresholdMs: 200,
 			autoSelectResult: true,
+			polishingToggleKey: 'Shift_L',
 		});
 		await expect(
 			context.pair.client.sendRequest(FcitxUpdateConfigRequest, {
-				config: { pttKey: 'Control+space', holdThresholdMs: 300, autoSelectResult: false },
+				config: {
+					pttKey: 'Control+space',
+					holdThresholdMs: 300,
+					autoSelectResult: false,
+					polishingToggleKey: 'Shift_L',
+				},
 			}),
 		).resolves.toBeNull();
 
@@ -332,6 +366,43 @@ describe('DaemonRpcConnection', () => {
 		);
 		expect(context.testProvider).toHaveBeenCalledWith('openrouter');
 		expect(context.updateFcitxConfig).toHaveBeenCalledOnce();
+	});
+
+	it('exposes dictionary read, validation, update, and reload methods', async () => {
+		const context = createTestContext();
+		await initialize(context);
+		const dictionary = {
+			version: 1 as const,
+			entries: [
+				{
+					term: 'VoxSpell',
+					aliases: ['voice spell'],
+					protect: true,
+					boost: 8,
+					enabled: true,
+				},
+			],
+		};
+
+		await expect(context.pair.client.sendRequest(DictionaryGetRequest, {})).resolves.toEqual({
+			dictionary: { version: 1, entries: [] },
+			path: '/tmp/voxspell/dictionary.yaml',
+			enabledCount: 0,
+			promptCharacters: 0,
+		});
+		await expect(
+			context.pair.client.sendRequest(DictionaryValidateRequest, { dictionary }),
+		).resolves.toBeNull();
+		await expect(
+			context.pair.client.sendRequest(DictionaryUpdateRequest, { dictionary }),
+		).resolves.toBeNull();
+		await expect(
+			context.pair.client.sendRequest(DictionaryReloadRequest, {}),
+		).resolves.toBeNull();
+
+		expect(context.validateDictionary).toHaveBeenCalledWith(dictionary);
+		expect(context.updateDictionary).toHaveBeenCalledWith(dictionary);
+		expect(context.reloadDictionary).toHaveBeenCalledOnce();
 	});
 
 	it('rejects ambiguous credential updates and maps config errors without echoing secrets', async () => {

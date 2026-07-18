@@ -46,6 +46,7 @@ describe('VoxSpell config paths', () => {
 			directory: '/tmp/config-home/voxspell',
 			configFile: '/tmp/development.yaml',
 			credentialsFile: '/tmp/config-home/voxspell/credentials.json',
+			dictionaryFile: '/tmp/dictionary.yaml',
 		});
 	});
 

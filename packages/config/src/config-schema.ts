@@ -51,6 +51,7 @@ export type OpenAiCompatibleTextPolisherConfig = Static<
 export const TextPolishingConfigSchema = Type.Object(
 	{
 		enabled: Type.Boolean(),
+		minimumEffectiveCharacters: Type.Optional(Type.Integer({ minimum: 0, maximum: 200 })),
 		activeProvider: Type.Optional(Type.String({ minLength: 1 })),
 		systemPrompt: Type.String({ minLength: 1 }),
 		providers: Type.Array(OpenAiCompatibleTextPolisherConfigSchema),
@@ -58,6 +59,14 @@ export const TextPolishingConfigSchema = Type.Object(
 	{ additionalProperties: false },
 );
 export type TextPolishingConfig = Static<typeof TextPolishingConfigSchema>;
+
+export const TextProcessingConfigSchema = Type.Object(
+	{
+		trimTrailingPeriod: Type.Boolean(),
+	},
+	{ additionalProperties: false },
+);
+export type TextProcessingConfig = Static<typeof TextProcessingConfigSchema>;
 
 export const VoxSpellConfigSchema = Type.Object(
 	{
@@ -71,6 +80,7 @@ export const VoxSpellConfigSchema = Type.Object(
 			},
 			{ additionalProperties: false },
 		),
+		textProcessing: Type.Optional(TextProcessingConfigSchema),
 		polishing: Type.Optional(TextPolishingConfigSchema),
 	},
 	{ additionalProperties: false },

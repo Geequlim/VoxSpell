@@ -1,11 +1,15 @@
 import { randomUUID } from 'node:crypto';
 
 import { TranscriptAssembler } from '@voxspell/asr-core/transcript-assembler';
-import { DefaultTextPipeline } from '@voxspell/text-pipeline/text-pipeline';
+import {
+	countEffectiveCharacters,
+	DefaultTextPipeline,
+} from '@voxspell/text-pipeline/text-pipeline';
+import { CompiledVoiceDictionary } from '@voxspell/text-pipeline/voice-dictionary';
 
 import { transitionSessionState } from './session-state.js';
 
-import type { PolishDictionaryEntry, TextPolisher } from '@voxspell/ai-polisher/text-polisher';
+import type { TextPolisher } from '@voxspell/ai-polisher/text-polisher';
 import type {
 	AsrEvent,
 	RealtimeAsrProvider,
@@ -19,6 +23,7 @@ import type {
 	SessionErrorParams,
 	SessionPhase,
 	SessionPhaseParams,
+	SessionPolishingStateParams,
 	SessionPreviewParams,
 	SessionResultsParams,
 	SessionStartResult,
@@ -31,6 +36,7 @@ import type { DaemonSessionGate } from './session-gate.js';
 export type DaemonSessionEvent =
 	| { readonly method: 'session.phase'; readonly params: SessionPhaseParams }
 	| { readonly method: 'session.preview'; readonly params: SessionPreviewParams }
+	| { readonly method: 'session.polishingState'; readonly params: SessionPolishingStateParams }
 	| { readonly method: 'session.results'; readonly params: SessionResultsParams }
 	| { readonly method: 'session.completed'; readonly params: SessionCompletedParams }
 	| { readonly method: 'session.error'; readonly params: SessionErrorParams };
@@ -42,17 +48,39 @@ export interface SessionCoordinatorOptions {
 	readonly textPipeline?: TextPipeline;
 	readonly textPolisher?: TextPolisher;
 	readonly getTextPolisher?: () => TextPolisher | undefined;
-	readonly getPolishDictionary?: () => readonly PolishDictionaryEntry[];
+	readonly getTextPolishingPolicy?: () => TextPolishingPolicy;
+	readonly getTrimTrailingPeriod?: () => boolean;
+	readonly getDictionary?: () => CompiledVoiceDictionary;
 	readonly publish?: (event: DaemonSessionEvent) => void;
 	readonly createSessionId?: () => SessionId;
 	readonly sessionGate?: DaemonSessionGate;
+	readonly onFailure?: (diagnostic: SessionFailureDiagnostic) => void;
 }
+
+export interface SessionFailureDiagnostic {
+	readonly sessionId?: SessionId;
+	readonly phase: SessionPhase | SessionState;
+	readonly error: ProtocolErrorData;
+}
+
+export interface TextPolishingPolicy {
+	readonly defaultEnabled: boolean;
+	readonly minimumEffectiveCharacters: number;
+}
+
+type SessionPolishingMode = 'auto' | 'forceOn' | 'forceOff';
 
 interface ActiveSession {
 	readonly id: SessionId;
 	readonly inputContextId: string;
 	readonly abortController: AbortController;
 	readonly transcriptAssembler: TranscriptAssembler;
+	readonly dictionary: CompiledVoiceDictionary;
+	readonly textPolisher?: TextPolisher;
+	readonly polishingPolicy: TextPolishingPolicy;
+	readonly trimTrailingPeriod: boolean;
+	polishingMode: SessionPolishingMode;
+	polishingEnabled?: boolean;
 	capture?: AudioCaptureSession;
 	asr?: RealtimeAsrSession;
 	phase?: SessionPhase;
@@ -83,10 +111,13 @@ export class SessionCoordinator {
 	readonly #getAsrProvider: () => RealtimeAsrProvider | undefined;
 	readonly #textPipeline: TextPipeline;
 	readonly #getTextPolisher: () => TextPolisher | undefined;
-	readonly #getPolishDictionary: () => readonly PolishDictionaryEntry[];
+	readonly #getTextPolishingPolicy: () => TextPolishingPolicy;
+	readonly #getTrimTrailingPeriod: () => boolean;
+	readonly #getDictionary: () => CompiledVoiceDictionary;
 	readonly #publish: (event: DaemonSessionEvent) => void;
 	readonly #createSessionId: () => SessionId;
 	readonly #sessionGate?: DaemonSessionGate;
+	readonly #onFailure: (diagnostic: SessionFailureDiagnostic) => void;
 	readonly #sessionOwner = {};
 	#state: SessionState = 'idle';
 	#active?: ActiveSession;
@@ -97,10 +128,16 @@ export class SessionCoordinator {
 		this.#getAsrProvider = options.getAsrProvider ?? (() => options.asrProvider);
 		this.#textPipeline = options.textPipeline ?? new DefaultTextPipeline();
 		this.#getTextPolisher = options.getTextPolisher ?? (() => options.textPolisher);
-		this.#getPolishDictionary = options.getPolishDictionary ?? (() => []);
+		this.#getTextPolishingPolicy =
+			options.getTextPolishingPolicy ??
+			(() => ({ defaultEnabled: true, minimumEffectiveCharacters: 0 }));
+		this.#getTrimTrailingPeriod = options.getTrimTrailingPeriod ?? (() => false);
+		const emptyDictionary = new CompiledVoiceDictionary({ version: 1, entries: [] });
+		this.#getDictionary = options.getDictionary ?? (() => emptyDictionary);
 		this.#publish = options.publish ?? (() => undefined);
 		this.#createSessionId = options.createSessionId ?? randomUUID;
 		this.#sessionGate = options.sessionGate;
+		this.#onFailure = options.onFailure ?? (() => undefined);
 	}
 
 	get state(): SessionState {
@@ -114,22 +151,32 @@ export class SessionCoordinator {
 	/** 创建并启动一次录音识别会话。 */
 	async start(inputContextId: string): Promise<SessionStartResult> {
 		if (this.#active) {
-			throw this.#createError(
+			const error = this.#createError(
 				'A recording session is already active',
 				'SESSION_BUSY',
 				'session',
 			);
+			this.#reportFailure(error.data, this.#active.id, this.#active.phase ?? this.#state);
+			throw error;
 		}
 		const asrProvider = this.#getAsrProvider();
 		if (!asrProvider) {
-			throw this.#createError('VoxSpell is not configured', 'NOT_CONFIGURED', 'config');
+			const error = this.#createError(
+				'VoxSpell is not configured',
+				'NOT_CONFIGURED',
+				'config',
+			);
+			this.#reportFailure(error.data, undefined, this.#state);
+			throw error;
 		}
 		if (this.#sessionGate && !this.#sessionGate.acquire(this.#sessionOwner)) {
-			throw this.#createError(
+			const error = this.#createError(
 				'A recording session is already active',
 				'SESSION_BUSY',
 				'session',
 			);
+			this.#reportFailure(error.data, undefined, this.#state);
+			throw error;
 		}
 
 		this.#state = transitionSessionState(this.#state, 'starting');
@@ -138,9 +185,15 @@ export class SessionCoordinator {
 			inputContextId,
 			abortController: new AbortController(),
 			transcriptAssembler: new TranscriptAssembler(),
+			dictionary: this.#getDictionary(),
+			textPolisher: this.#getTextPolisher(),
+			polishingPolicy: this.#getTextPolishingPolicy(),
+			trimTrailingPeriod: this.#getTrimTrailingPeriod(),
+			polishingMode: 'auto',
 		};
 		this.#active = active;
 		this.#announcePhase(active, 'preparing');
+		this.#updatePolishingState(active);
 
 		try {
 			active.asr = await asrProvider.createSession({ sessionId: active.id });
@@ -178,6 +231,23 @@ export class SessionCoordinator {
 		active.audioPump = this.#pumpAudio(active);
 
 		return { sessionId: active.id };
+	}
+
+	/** 强制设置本轮语音是否使用 AI 润色。 */
+	setPolishingEnabled(sessionId: SessionId, enabled: boolean): void {
+		const active = this.#active;
+		if (!active || active.id !== sessionId) {
+			throw this.#createError('Session was not found', 'SESSION_NOT_FOUND', 'session');
+		}
+		if (this.#state !== 'recording') {
+			throw this.#createError(
+				'Polishing can only be changed while recording',
+				'INVALID_SESSION_STATE',
+				'session',
+			);
+		}
+		active.polishingMode = enabled ? 'forceOn' : 'forceOff';
+		this.#updatePolishingState(active);
 	}
 
 	/** 正常结束指定会话；重复调用不会重复关闭后端。 */
@@ -388,7 +458,11 @@ export class SessionCoordinator {
 		this.#announcePhase(active, 'processing');
 		try {
 			active.transcript = await this.#textPipeline.processTranscript(
-				text,
+				{
+					text,
+					dictionary: active.dictionary,
+					trimTrailingPeriod: active.trimTrailingPeriod,
+				},
 				active.abortController.signal,
 			);
 			if (!active.transcript) throw new Error('Text pipeline returned an empty transcript');
@@ -402,8 +476,7 @@ export class SessionCoordinator {
 			return true;
 		}
 
-		const textPolisher = this.#getTextPolisher();
-		if (!textPolisher) {
+		if (!active.textPolisher || !this.#shouldPolish(active, active.transcript)) {
 			this.#publishResults(active, 'transcript');
 			this.#completeResult(active, 'transcript', active.transcript);
 			return true;
@@ -412,23 +485,18 @@ export class SessionCoordinator {
 		this.#publishResults(active);
 		this.#transition(active, 'polishing');
 		this.#announcePhase(active, 'polishing');
-		const dictionary = structuredClone(this.#getPolishDictionary());
-		await this.#runPolisher(active, textPolisher, dictionary);
+		await this.#runPolisher(active, active.textPolisher);
 		return true;
 	}
 
-	async #runPolisher(
-		active: ActiveSession,
-		textPolisher: TextPolisher,
-		dictionary: readonly PolishDictionaryEntry[],
-	): Promise<void> {
+	async #runPolisher(active: ActiveSession, textPolisher: TextPolisher): Promise<void> {
 		const controller = new AbortController();
 		active.polishAbortController = controller;
 		let polished = '';
 
 		try {
 			for await (const event of textPolisher.polish(
-				{ text: active.transcript!, dictionary },
+				{ text: active.transcript!, dictionary: active.dictionary.entries },
 				controller.signal,
 			)) {
 				if (!this.#isCurrent(active) || this.#state !== 'polishing') return;
@@ -446,7 +514,12 @@ export class SessionCoordinator {
 					return;
 				}
 				active.polished = await this.#textPipeline.processPolished(
-					{ transcript: active.transcript!, polished, dictionary },
+					{
+						transcript: active.transcript!,
+						polished,
+						dictionary: active.dictionary,
+						trimTrailingPeriod: active.trimTrailingPeriod,
+					},
 					controller.signal,
 				);
 				if (!this.#isCurrent(active) || this.#state !== 'polishing') return;
@@ -502,6 +575,32 @@ export class SessionCoordinator {
 		this.#publish({ method: 'session.phase', params: { sessionId: active.id, phase } });
 	}
 
+	#updatePolishingState(active: ActiveSession): void {
+		let enabled = false;
+		if (active.textPolisher) {
+			if (active.polishingMode === 'forceOn') {
+				enabled = true;
+			} else if (active.polishingMode === 'auto') {
+				enabled = active.polishingPolicy.defaultEnabled;
+			}
+		}
+		if (active.polishingEnabled === enabled) return;
+		active.polishingEnabled = enabled;
+		this.#publish({
+			method: 'session.polishingState',
+			params: { sessionId: active.id, enabled },
+		});
+	}
+
+	#shouldPolish(active: ActiveSession, text: string): boolean {
+		if (active.polishingMode === 'forceOn') return true;
+		if (active.polishingMode === 'forceOff') return false;
+		return (
+			active.polishingPolicy.defaultEnabled &&
+			countEffectiveCharacters(text) >= active.polishingPolicy.minimumEffectiveCharacters
+		);
+	}
+
 	#completeResult(active: ActiveSession, choiceId: SessionChoiceId, text: string): void {
 		if (!this.#isCurrent(active)) return;
 		this.#transition(active, 'completed');
@@ -513,10 +612,16 @@ export class SessionCoordinator {
 	}
 
 	async #fail(active: ActiveSession, data: ProtocolErrorData): Promise<void> {
-		if (!this.#isCurrent(active) || this.#state === 'failed' || this.#state === 'cancelling') {
+		if (
+			!this.#isCurrent(active) ||
+			active.failure ||
+			this.#state === 'failed' ||
+			this.#state === 'cancelling'
+		) {
 			return;
 		}
 		active.failure = data;
+		this.#reportFailure(data, active.id, active.phase ?? this.#state);
 		active.abortController.abort(data.code);
 		active.polishAbortController?.abort(data.code);
 		await Promise.allSettled([
@@ -559,5 +664,13 @@ export class SessionCoordinator {
 		stage: ProtocolErrorData['stage'],
 	): SessionCoordinatorError {
 		return new SessionCoordinatorError(message, { code, stage, retryable: false });
+	}
+
+	#reportFailure(
+		error: ProtocolErrorData,
+		sessionId: SessionId | undefined,
+		phase: SessionPhase | SessionState,
+	): void {
+		this.#onFailure({ sessionId, phase, error });
 	}
 }

@@ -113,6 +113,7 @@ export class FcitxConfigClient {
 		const pttKey = this.#readString(entries, 'PTTKey');
 		const holdThresholdMs = Number(this.#readString(entries, 'HoldThresholdMs'));
 		const autoSelectResultSource = this.#readString(entries, 'AutoSelectResult');
+		const polishingToggleKey = this.#readString(entries, 'PolishingToggleKey');
 		if (!Number.isInteger(holdThresholdMs) || holdThresholdMs < 100 || holdThresholdMs > 2000) {
 			throw new FcitxConfigError();
 		}
@@ -123,6 +124,7 @@ export class FcitxConfigClient {
 			pttKey,
 			holdThresholdMs,
 			autoSelectResult: autoSelectResultSource === 'True',
+			polishingToggleKey,
 		};
 	}
 
@@ -134,6 +136,7 @@ export class FcitxConfigClient {
 				['PTTKey', ['s', config.pttKey]],
 				['HoldThresholdMs', ['s', `${config.holdThresholdMs}`]],
 				['AutoSelectResult', ['s', config.autoSelectResult ? 'True' : 'False']],
+				['PolishingToggleKey', ['s', config.polishingToggleKey]],
 			],
 		];
 		await this.#transport.setConfig(variant);
@@ -141,7 +144,8 @@ export class FcitxConfigClient {
 		if (
 			applied.pttKey !== config.pttKey ||
 			applied.holdThresholdMs !== config.holdThresholdMs ||
-			applied.autoSelectResult !== config.autoSelectResult
+			applied.autoSelectResult !== config.autoSelectResult ||
+			applied.polishingToggleKey !== config.polishingToggleKey
 		) {
 			throw new FcitxConfigError();
 		}

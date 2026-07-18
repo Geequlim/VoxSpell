@@ -25,15 +25,15 @@ DocsModule:
   pages:
     - data:
         features:
-          - description: 集成丰富的开发工具，提供开箱即用的解决方案。
+          - description: 集成 Fcitx 5，在日常键盘输入之外提供按住说话的语音输入体验。
             image: /assets/dev/docs/img/icons8-app-development.svg
-            title: 功能丰富
-          - description: 自由组合所需服务，专注于业务功能的开发。
+            title: 自然输入
+          - description: 支持多种语音识别服务、用户词典与确定性文本处理。
             image: /assets/dev/docs/img/icons8-dependencies.svg
-            title: 模块化开发
-          - description: 采用标准化的开发范式，提升团队协作效率。
+            title: 灵活组合
+          - description: 通过 GTK 桌面程序统一完成配置、状态查看与故障诊断。
             image: /assets/dev/docs/img/icons8-correction.svg
-            title: 统一规范
+            title: 桌面配置
       path: ''
       shell:
         breadcrumbs: false
@@ -83,6 +83,6 @@ DocsModule:
       order: 100
       title: Agent
       useOrphanDocsAsDirs: true
-  tagline: 像搭积木一样构建游戏
-  title: 青鱼游戏开发框架
+  tagline: 面向 Linux 与 Fcitx 5 的现代 AI 语音输入工具
+  title: 言出法随
   workspace: ..

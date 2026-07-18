@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CopyRspackPlugin } from '@rspack/core';
 import { TsCheckerRspackPlugin } from 'ts-checker-rspack-plugin';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
@@ -46,6 +47,9 @@ export default {
 		},
 	},
 	plugins: [
+		new CopyRspackPlugin({
+			patterns: [{ from: 'icons', to: 'icons' }],
+		}),
 		new TsCheckerRspackPlugin({
 			typescript: {
 				configFile: path.join(directory, 'tsconfig.json'),

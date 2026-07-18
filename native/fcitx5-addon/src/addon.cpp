@@ -1,5 +1,6 @@
 #include "config.h"
 #include "daemon-client.h"
+#include "error-presentation.h"
 #include "status-animation.h"
 #include "tap-hold-state.h"
 
@@ -19,6 +20,7 @@
 #include <fcitx-utils/event.h>
 #include <fcitx-utils/eventloopinterface.h>
 #include <fcitx-utils/key.h>
+#include <fcitx-utils/log.h>
 #include <fcitx-utils/trackableobject.h>
 
 #include <sys/timerfd.h>
@@ -39,8 +41,8 @@ namespace voxspell {
 namespace {
 
 constexpr char configFile[] = "conf/voxspell.conf";
-constexpr char errorMessage[] = "⚠️ 本次语音输入失败";
-constexpr std::uint64_t errorMessageDurationUs = 1600000;
+
+FCITX_DEFINE_LOG_CATEGORY(voxspellLog, "voxspell");
 
 class ResultCandidateWord final : public fcitx::CandidateWord {
 public:
@@ -71,13 +73,14 @@ public:
 	TapHoldPhase phase = TapHoldPhase::Idle;
 	bool replaying = false;
 	bool passingInjectedSpace = false;
+	bool polishingTogglePressed = false;
 	bool ownsPanel = false;
+	bool showingError = false;
 	fcitx::KeySym swallowedSelectionKey = FcitxKey_None;
 	fcitx::Key triggerKey;
 	fcitx::Key triggerRawKey;
 	int triggerPressTime = 0;
 	std::unique_ptr<fcitx::EventSourceTime> holdTimer;
-	std::unique_ptr<fcitx::EventSourceTime> feedbackTimer;
 };
 
 } // namespace
@@ -125,6 +128,10 @@ public:
 				.preview = [this](const protocol::SessionPreviewParams &params) {
 					handlePreview(params);
 				},
+				.polishingState =
+					[this](const protocol::SessionPolishingStateParams &params) {
+						handlePolishingState(params);
+					},
 				.results = [this](const protocol::SessionResultsParams &params) {
 					handleResults(params);
 				},
@@ -134,10 +141,17 @@ public:
 				.sessionError = [this](const protocol::SessionErrorParams &params) {
 					handleSessionError(params);
 				},
-				.error = [this](const std::string &sessionId, const std::string &) {
-					handleDaemonError(sessionId);
+				.error = [this](
+					const std::string &sessionId,
+					const std::string &message,
+					const std::optional<protocol::ProtocolErrorData> &data) {
+					handleDaemonError(
+						sessionId,
+						data ? presentSessionError(*data) : presentClientError(message));
 				},
-				.disconnected = [this]() { handleDaemonError({}); },
+				.disconnected = [this]() {
+					handleDaemonError({}, presentClientError("后台服务连接已断开"));
+				},
 			});
 	}
 
@@ -179,6 +193,9 @@ private:
 			}
 			return;
 		}
+		if (handlePolishingToggleKey(keyEvent, *state)) {
+			return;
+		}
 		if (keyEvent.isRelease() &&
 			state->swallowedSelectionKey == keyEvent.key().sym()) {
 			state->swallowedSelectionKey = FcitxKey_None;
@@ -189,8 +206,8 @@ private:
 			return;
 		}
 
-		if (!keyEvent.isRelease() && state->feedbackTimer) {
-			state->feedbackTimer.reset();
+		if (!keyEvent.isRelease() && state->showingError) {
+			state->showingError = false;
 			clearOwnPanel(inputContext);
 		}
 
@@ -265,6 +282,44 @@ private:
 			keyEvent.time());
 	}
 
+	bool handlePolishingToggleKey(
+		fcitx::KeyEvent &keyEvent,
+		InputContextState &state) {
+		const auto configuredKey = config_.polishingToggleKey.value().normalize();
+		const auto configuredSym = configuredKey.sym();
+		const auto eventSym = keyEvent.key().sym();
+		const bool configuredShift =
+			configuredSym == FcitxKey_Shift_L ||
+			configuredSym == FcitxKey_Shift_R;
+		const bool eventShift =
+			eventSym == FcitxKey_Shift_L || eventSym == FcitxKey_Shift_R;
+		if (!(configuredShift && eventShift) &&
+			!keyEvent.key().check(configuredKey)) {
+			return false;
+		}
+		if (keyEvent.isRelease() && state.polishingTogglePressed) {
+			state.polishingTogglePressed = false;
+			keyEvent.filterAndAccept();
+			return true;
+		}
+		if (state.phase != TapHoldPhase::Active ||
+			voiceInputContext_.get() != keyEvent.inputContext() ||
+			sessionPhase_ != "recording") {
+			return false;
+		}
+
+		keyEvent.filterAndAccept();
+		if (keyEvent.isRelease()) return true;
+		if (state.polishingTogglePressed) {
+			return true;
+		}
+		state.polishingTogglePressed = true;
+		daemonClient_->setPolishingEnabled(
+			voiceSessionId_,
+			!polishingEnabled_);
+		return true;
+	}
+
 	void applyTransition(
 		fcitx::InputContext *inputContext,
 		InputContextState &state,
@@ -293,7 +348,7 @@ private:
 			break;
 		case TapHoldAction::Clear:
 			state.holdTimer.reset();
-			state.feedbackTimer.reset();
+			state.showingError = false;
 			cancelVoiceSession(inputContext, "focus-lost");
 			clearOwnPanel(inputContext);
 			break;
@@ -448,6 +503,7 @@ private:
 	}
 
 	void startVoiceSession(fcitx::InputContext *inputContext) {
+		FCITX_LOGC(voxspellLog, Info) << "session.start requested";
 		cancelVoiceSession(nullptr, "replaced");
 		voiceInputContext_ = inputContext->watch();
 		voiceSessionId_.clear();
@@ -482,7 +538,7 @@ private:
 		fcitx::InputContext *inputContext,
 		InputContextState &state) {
 		state.holdTimer.reset();
-		state.feedbackTimer.reset();
+		state.showingError = false;
 		if (voiceInputContext_.get() != inputContext) {
 			return;
 		}
@@ -494,28 +550,19 @@ private:
 		}
 	}
 
-	void showTimedError(
+	void showPersistentError(
 		fcitx::InputContext *inputContext,
-		InputContextState &state) {
-		setVoicePanel(inputContext, errorMessage, {}, nullptr);
-
-		auto inputContextReference = inputContext->watch();
-		state.feedbackTimer = instance_->eventLoop().addTimeEvent(
-			CLOCK_MONOTONIC,
-			fcitx::now(CLOCK_MONOTONIC) + errorMessageDurationUs,
-			0,
-			[this, inputContextReference](fcitx::EventSourceTime *, std::uint64_t) {
-				auto *currentInputContext = inputContextReference.get();
-				if (!currentInputContext) {
-					return false;
-				}
-
-				auto *currentState = currentInputContext->propertyFor(&stateFactory_);
-				currentState->feedbackTimer.reset();
-				clearOwnPanel(currentInputContext);
-				return false;
-			});
-		state.feedbackTimer->setOneShot();
+		InputContextState &state,
+		const ErrorPresentation &presentation) {
+		stopStatusAnimation();
+		state.ownsPanel = true;
+		state.showingError = true;
+		auto &inputPanel = inputContext->inputPanel();
+		inputPanel.setAuxUp(fcitx::Text("⚠️ " + presentation.summary));
+		inputPanel.setAuxDown(fcitx::Text(presentation.diagnostic));
+		inputPanel.setPreedit(fcitx::Text());
+		inputPanel.setCandidateList(nullptr);
+		inputContext->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
 	}
 
 	void setVoicePanel(
@@ -525,6 +572,7 @@ private:
 		std::unique_ptr<fcitx::CandidateList> candidates) {
 		auto *state = inputContext->propertyFor(&stateFactory_);
 		state->ownsPanel = true;
+		state->showingError = false;
 		auto &inputPanel = inputContext->inputPanel();
 		inputPanel.setAuxUp(fcitx::Text(status));
 		inputPanel.setAuxDown(fcitx::Text());
@@ -536,7 +584,11 @@ private:
 	std::string animatedStatus(const StatusAnimationStage &stage) const {
 		const auto &frame =
 			stage.frames[animationFrameIndex_ % stage.frames.size()];
-		return frame + " " + stage.text;
+		std::string status = frame + " " + stage.text;
+		if (sessionPhase_ == "recording" && polishingEnabled_) {
+			status += " ✨";
+		}
+		return status;
 	}
 
 	void setStatusAnimation(std::string_view stageId) {
@@ -770,9 +822,12 @@ private:
 		}
 		if (!voiceSessionId_.empty() && voiceSessionId_ != sessionId) {
 			daemonClient_->cancel(sessionId, "client-disconnected");
-			handleDaemonError(voiceSessionId_);
+			handleDaemonError(
+				voiceSessionId_,
+				presentClientError("后台返回了不匹配的会话标识"));
 			return;
 		}
+		FCITX_LOGC(voxspellLog, Info) << "session.started session=" << sessionId;
 		voiceSessionId_ = sessionId;
 		startPending_ = false;
 		if (finishRequested_) {
@@ -792,6 +847,9 @@ private:
 		if (params.sessionId != voiceSessionId_) {
 			return;
 		}
+		FCITX_LOGC(voxspellLog, Info)
+			<< "session.phase session=" << params.sessionId
+			<< " phase=" << params.phase;
 		sessionPhase_ = params.phase;
 		if (sessionPhase_ == "polishing") {
 			sawPolishing_ = true;
@@ -805,6 +863,16 @@ private:
 			return;
 		}
 		previewText_ = params.text;
+		renderCurrentVoiceState();
+	}
+
+	void handlePolishingState(
+		const protocol::SessionPolishingStateParams &params) {
+		auto *inputContext = voiceInputContext_.get();
+		if (!inputContext || params.sessionId != voiceSessionId_) {
+			return;
+		}
+		polishingEnabled_ = params.enabled;
 		renderCurrentVoiceState();
 	}
 
@@ -865,20 +933,37 @@ private:
 		if (params.sessionId != voiceSessionId_) {
 			return;
 		}
-		handleDaemonError(params.sessionId);
+		std::string diagnostic =
+			"session.error session=" + params.sessionId +
+			" code=" + params.error.code + " stage=" + params.error.stage +
+			" retryable=" + (params.error.retryable ? "true" : "false");
+		if (params.error.providerCode) {
+			diagnostic += " provider=" + *params.error.providerCode;
+		}
+		FCITX_LOGC(voxspellLog, Error) << diagnostic;
+		handleDaemonError(params.sessionId, presentSessionError(params.error), false);
 	}
 
-	void handleDaemonError(const std::string &sessionId) {
+	void handleDaemonError(
+		const std::string &sessionId,
+		const ErrorPresentation &presentation,
+		bool writeLog = true) {
 		auto *inputContext = voiceInputContext_.get();
 		if (!inputContext ||
 			(!sessionId.empty() && sessionId != voiceSessionId_)) {
 			return;
 		}
+		if (writeLog) {
+			FCITX_LOGC(voxspellLog, Error)
+				<< "daemon.error session="
+				<< (sessionId.empty() ? "pending" : sessionId)
+				<< " detail=" << presentation.diagnostic;
+		}
 		auto *state = inputContext->propertyFor(&stateFactory_);
 		clearOwnPanel(inputContext);
 		voiceInputContext_.unwatch();
 		clearVoiceSessionState();
-		showTimedError(inputContext, *state);
+		showPersistentError(inputContext, *state, presentation);
 	}
 
 	void cancelVoiceSession(
@@ -920,6 +1005,7 @@ private:
 		polishedResult_.reset();
 		recommendedChoiceId_.reset();
 		selectedChoiceId_ = "polished";
+		polishingEnabled_ = false;
 		finishRequested_ = false;
 		selectionRequested_ = false;
 		sawPolishing_ = false;
@@ -945,9 +1031,10 @@ private:
 		auto *state = inputContext->propertyFor(&stateFactory_);
 		state->phase = TapHoldPhase::Idle;
 		state->passingInjectedSpace = false;
+		state->polishingTogglePressed = false;
 		state->swallowedSelectionKey = FcitxKey_None;
 		state->holdTimer.reset();
-		state->feedbackTimer.reset();
+		state->showingError = false;
 		if (updateUi) {
 			clearOwnPanel(inputContext);
 		}
@@ -975,6 +1062,7 @@ private:
 	bool selectionRequested_ = false;
 	bool sawPolishing_ = false;
 	bool committed_ = false;
+	bool polishingEnabled_ = false;
 	StatusAnimationConfig statusAnimations_ = defaultStatusAnimationConfig();
 	std::string activeAnimationId_;
 	std::size_t animationFrameIndex_ = 0;

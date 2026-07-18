@@ -45,6 +45,11 @@ export class ConfigState {
 	private readonly $daemon: DaemonState;
 	private $loadId = 0;
 	private $loaded = false;
+	private $disposed = false;
+	private $saveTimer?: NodeJS.Timeout;
+	private $savePromise?: Promise<void>;
+	private $saveRequested = false;
+	private readonly $credentialNamesReadyToSave = new Set<string>();
 
 	constructor(client: ConfigClient, daemon: DaemonState) {
 		this.$client = client;
@@ -130,6 +135,14 @@ export class ConfigState {
 		return this.draft?.polishing?.enabled ?? false;
 	}
 
+	@derived get polishingMinimumEffectiveCharacters(): number {
+		return this.draft?.polishing?.minimumEffectiveCharacters ?? 0;
+	}
+
+	@derived get trimTrailingPeriod(): boolean {
+		return this.draft?.textProcessing?.trimTrailingPeriod ?? false;
+	}
+
 	@derived get activeTextPolisher() {
 		const polishing = this.draft?.polishing;
 		return polishing?.providers.find((provider) => provider.id === polishing.activeProvider);
@@ -159,7 +172,7 @@ export class ConfigState {
 	@derived get polishingCredentialStatus(): string {
 		const name = this.polishingApiKeyEnvironment;
 		if (!name) return '尚未配置凭据名称';
-		if (this.pendingCredentialValues[name]) return '已输入新值，保存后生效';
+		if (this.pendingCredentialValues[name]) return '已输入新值，完成输入后自动保存';
 		if (this.storedCredentialNames.includes(name)) return '已安全存储';
 		if (!this.$daemon.status?.missingCredentialNames.includes(name)) {
 			return '由 daemon 运行环境提供';
@@ -182,7 +195,7 @@ export class ConfigState {
 	@derived get selectedCredentialStatus(): string {
 		const name = this.selectedCredentialName;
 		if (!name) return '当前识别服务不需要凭据';
-		if (this.pendingCredentialValues[name]) return '已输入新值，保存后生效';
+		if (this.pendingCredentialValues[name]) return '已输入新值，完成输入后自动保存';
 		if (this.storedCredentialNames.includes(name)) return '已安全存储';
 		const activeProviderId = this.draft?.asr.activeProvider;
 		const status = this.$daemon.status;
@@ -207,13 +220,8 @@ export class ConfigState {
 		return (
 			this.$daemon.connectionPhase === 'connected' &&
 			this.phase !== 'loading' &&
-			this.phase !== 'saving' &&
 			this.phase !== 'testing'
 		);
-	}
-
-	@derived get canSave(): boolean {
-		return this.isEditable && this.isDirty;
 	}
 
 	@derived get canAddProvider(): boolean {
@@ -238,20 +246,11 @@ export class ConfigState {
 		return this.isEditable && Boolean(this.config) && !this.isDirty;
 	}
 
-	@derived get canReload(): boolean {
-		return (
-			this.$daemon.connectionPhase === 'connected' &&
-			this.phase !== 'loading' &&
-			this.phase !== 'saving' &&
-			this.phase !== 'testing'
-		);
-	}
-
 	@derived get operationDescription(): string {
 		if (this.phase === 'loading') return '正在读取 daemon 配置…';
-		if (this.phase === 'saving') return '正在校验并保存配置…';
+		if (this.phase === 'saving') return '正在校验并自动保存配置…';
 		if (this.phase === 'testing') return '正在测试识别服务连接…';
-		if (this.phase === 'saved') return '更改已保存并应用。';
+		if (this.phase === 'saved') return '更改已自动保存并应用。';
 		if (this.phase === 'error') {
 			const fieldErrorDescription = Object.entries(this.fieldErrors)
 				.map(([field, error]) => `${getFieldLabel(field)}：${error}`)
@@ -261,12 +260,12 @@ export class ConfigState {
 		if (this.providerTestResult) {
 			return `识别服务测试成功，耗时 ${this.providerTestResult.latencyMs} ms。`;
 		}
-		if (!this.config && this.draft) return '尚无配置，请填写后保存第一份配置。';
+		if (!this.config && this.draft) return '尚无配置，完成必填项后将自动保存。';
 		return '';
 	}
 
 	@derived get operationTitle(): string {
-		if (this.phase !== 'error') return '状态';
+		if (this.phase !== 'error') return '自动保存';
 		const errorCount = Object.keys(this.fieldErrors).length;
 		return errorCount > 0 ? `配置有 ${errorCount} 项需要修正` : '配置操作失败';
 	}
@@ -283,6 +282,10 @@ export class ConfigState {
 	@action private applyDisconnected(): void {
 		this.$loadId += 1;
 		this.$loaded = false;
+		if (this.$saveTimer) clearTimeout(this.$saveTimer);
+		this.$saveTimer = undefined;
+		this.$saveRequested = false;
+		this.$credentialNamesReadyToSave.clear();
 		this.phase = 'idle';
 		this.errorMessage = undefined;
 	}
@@ -312,7 +315,7 @@ export class ConfigState {
 		if (!this.draft || !providerId) return;
 		this.draft.asr.activeProvider = providerId;
 		this.selectFirstCredential();
-		this.clearOperationResult();
+		this.scheduleAutoSave();
 	}
 
 	/** 选择当前准备更新的凭据名称。 */
@@ -327,21 +330,20 @@ export class ConfigState {
 		this.clearOperationResult();
 	}
 
+	/** 将当前识别服务凭据标记为输入完成并立即自动保存。 */
+	@action
+	commitSelectedCredential(): void {
+		if (!this.selectedCredentialName || !this.selectedCredentialValue) return;
+		this.$credentialNamesReadyToSave.add(this.selectedCredentialName);
+		this.scheduleAutoSave();
+	}
+
 	/** 更新当前 OpenAI 兼容 Provider 的 API 地址。 */
 	@action updateBaseUrl(value: string): void {
 		const provider = this.activeProvider;
 		if (provider?.type !== 'openai-compatible-transcription') return;
 		provider.baseUrl = value;
-		this.clearOperationResult();
-	}
-
-	/** 更新当前 Provider ID，并保持其为当前选中项。 */
-	@action updateProviderId(value: string): void {
-		const provider = this.activeProvider;
-		if (!this.draft || !provider) return;
-		provider.id = value;
-		this.draft.asr.activeProvider = value;
-		this.clearOperationResult();
+		this.scheduleAutoSave(500);
 	}
 
 	/** 更新当前 OpenAI 兼容 Provider 的模型名称。 */
@@ -349,7 +351,7 @@ export class ConfigState {
 		const provider = this.activeProvider;
 		if (provider?.type !== 'openai-compatible-transcription') return;
 		provider.model = value;
-		this.clearOperationResult();
+		this.scheduleAutoSave(500);
 	}
 
 	/** 更新当前 OpenAI 兼容 Provider 的凭据名称。 */
@@ -358,7 +360,7 @@ export class ConfigState {
 		if (provider?.type !== 'openai-compatible-transcription') return;
 		provider.apiKeyEnvironment = value;
 		this.selectFirstCredential();
-		this.clearOperationResult();
+		this.scheduleAutoSave(500);
 	}
 
 	/** 更新当前腾讯实时 Provider 的引擎模型。 */
@@ -366,33 +368,46 @@ export class ConfigState {
 		const provider = this.activeProvider;
 		if (provider?.type !== 'tencent-realtime') return;
 		provider.engineModelType = value;
-		this.clearOperationResult();
+		this.scheduleAutoSave(500);
 	}
 
 	/** 启用或关闭 AI 文本润色。 */
 	@action updatePolishingEnabled(enabled: boolean): void {
 		this.getOrCreatePolishing().enabled = enabled;
-		this.clearOperationResult();
+		this.scheduleAutoSave();
+	}
+
+	/** 更新自动润色所需的最少有效字符数。 */
+	@action updatePolishingMinimumEffectiveCharacters(minimumEffectiveCharacters: number): void {
+		this.getOrCreatePolishing().minimumEffectiveCharacters = minimumEffectiveCharacters;
+		this.scheduleAutoSave(300);
+	}
+
+	/** 设置是否裁剪最终文本尾部的句号。 */
+	@action updateTrimTrailingPeriod(trimTrailingPeriod: boolean): void {
+		if (!this.draft) return;
+		this.draft.textProcessing = { trimTrailingPeriod };
+		this.scheduleAutoSave();
 	}
 
 	/** 更新 AI 润色 Provider 的 API 地址。 */
 	@action updatePolishingBaseUrl(value: string): void {
 		const provider = this.getOrCreateTextPolisher();
 		provider.baseUrl = value;
-		this.clearOperationResult();
+		this.scheduleAutoSave(500);
 	}
 
 	/** 更新 AI 润色 Provider 的模型。 */
 	@action updatePolishingModel(value: string): void {
 		const provider = this.getOrCreateTextPolisher();
 		provider.model = value;
-		this.clearOperationResult();
+		this.scheduleAutoSave(500);
 	}
 
 	/** 更新 AI 润色 Provider 的凭据名称。 */
 	@action updatePolishingApiKeyEnvironment(value: string): void {
 		this.getOrCreateTextPolisher().apiKeyEnvironment = value;
-		this.clearOperationResult();
+		this.scheduleAutoSave(500);
 	}
 
 	/** 更新 AI 润色 Provider 的待保存凭据。 */
@@ -403,16 +418,25 @@ export class ConfigState {
 		this.clearOperationResult();
 	}
 
+	/** 将 AI 润色凭据标记为输入完成并立即自动保存。 */
+	@action
+	commitPolishingCredential(): void {
+		const name = this.polishingApiKeyEnvironment;
+		if (!name || !this.polishingCredentialValue) return;
+		this.$credentialNamesReadyToSave.add(name);
+		this.scheduleAutoSave();
+	}
+
 	/** 更新用户维护的基础系统提示词。 */
 	@action updatePolishingSystemPrompt(value: string): void {
 		this.getOrCreatePolishing().systemPrompt = value;
-		this.clearOperationResult();
+		this.scheduleAutoSave(800);
 	}
 
 	/** 恢复内置的 AI 润色系统提示词。 */
 	@action resetPolishingSystemPrompt(): void {
 		this.getOrCreatePolishing().systemPrompt = DEFAULT_POLISH_SYSTEM_PROMPT;
-		this.clearOperationResult();
+		this.scheduleAutoSave();
 	}
 
 	/** 更新新建 Provider 的类型。 */
@@ -454,7 +478,7 @@ export class ConfigState {
 		this.draft.asr.activeProvider = id;
 		this.newProviderId = '';
 		this.selectFirstCredential();
-		this.clearOperationResult();
+		this.scheduleAutoSave();
 	}
 
 	/** 删除当前 Provider，并先切换到剩余的第一个 Provider。 */
@@ -465,9 +489,12 @@ export class ConfigState {
 		const providers = this.draft.asr.providers.filter((provider) => provider.id !== providerId);
 		this.draft.asr.providers = providers;
 		this.draft.asr.activeProvider = providers[0]!.id;
-		credentialNames.forEach((name) => delete this.pendingCredentialValues[name]);
+		credentialNames.forEach((name) => {
+			delete this.pendingCredentialValues[name];
+			this.$credentialNamesReadyToSave.delete(name);
+		});
 		this.selectFirstCredential();
-		this.clearOperationResult();
+		this.scheduleAutoSave();
 	}
 
 	/** 删除当前凭据在应用私有凭据库中的值。 */
@@ -500,18 +527,41 @@ export class ConfigState {
 		}
 	}
 
-	/** 丢弃未保存的配置和凭据草稿。 */
-	@action discard(): void {
-		this.draft = structuredClone(toJS(this.config ?? createInitialConfig()));
-		this.pendingCredentialValues = {};
-		this.newProviderId = '';
-		this.selectFirstCredential();
-		this.clearOperationResult();
+	/** 立即提交尚未触发的配置和凭据自动保存任务。 */
+	async flushPendingChanges(): Promise<void> {
+		Object.entries(this.pendingCredentialValues).forEach(([name, value]) => {
+			if (value) this.$credentialNamesReadyToSave.add(name);
+		});
+		await this.flushAutoSave();
 	}
 
-	/** 校验并保存凭据与候选配置，然后刷新 daemon 状态。 */
-	@action async save(): Promise<void> {
-		if (!this.canSave || !this.draft) return;
+	private async flushAutoSave(): Promise<void> {
+		if (this.$saveTimer) {
+			clearTimeout(this.$saveTimer);
+			this.$saveTimer = undefined;
+		}
+		if (!this.isDirty || this.$disposed) return;
+		this.$saveRequested = true;
+		if (this.$savePromise) return this.$savePromise;
+		const savePromise = this.runAutoSaveLoop();
+		this.$savePromise = savePromise;
+		try {
+			await savePromise;
+		} finally {
+			if (this.$savePromise === savePromise) this.$savePromise = undefined;
+		}
+	}
+
+	private async runAutoSaveLoop(): Promise<void> {
+		while (this.$saveRequested && !this.$disposed) {
+			this.$saveRequested = false;
+			await this.persistCurrentDraft();
+		}
+	}
+
+	/** 校验并自动保存当前配置快照，然后刷新 daemon 状态。 */
+	@action private async persistCurrentDraft(): Promise<void> {
+		if (!this.draft || !this.isDirty) return;
 		const candidate = structuredClone(toJS(this.draft));
 		const provider = candidate.asr.providers.find(
 			(item) => item.id === candidate.asr.activeProvider,
@@ -569,7 +619,9 @@ export class ConfigState {
 		}
 
 		const credentialEntries = Object.entries(this.pendingCredentialValues)
-			.filter(([, value]) => value.length > 0)
+			.filter(
+				([name, value]) => value.length > 0 && this.$credentialNamesReadyToSave.has(name),
+			)
 			.map(([name, value]) => ({ name, value }));
 		this.phase = 'saving';
 		this.errorMessage = undefined;
@@ -577,15 +629,10 @@ export class ConfigState {
 		try {
 			if (credentialEntries.length > 0) {
 				await this.$client.updateCredentials({ set: credentialEntries, delete: [] });
-				this.applyStoredCredentials(credentialEntries.map((entry) => entry.name));
 			}
 			await this.$client.validateConfig(candidate);
 			await this.$client.updateConfig(candidate);
-			const [config, credentials] = await Promise.all([
-				this.$client.getConfig(),
-				this.$client.getCredentialsStatus(),
-			]);
-			this.applySavedConfig(config, credentials);
+			this.applyAutoSaved(candidate, credentialEntries);
 			await this.$daemon.refresh();
 		} catch (error) {
 			this.applyOperationError(error);
@@ -594,8 +641,21 @@ export class ConfigState {
 
 	/** 释放 MobX effect。 */
 	dispose(): void {
+		this.$disposed = true;
 		this.$loadId += 1;
+		if (this.$saveTimer) clearTimeout(this.$saveTimer);
+		this.$saveTimer = undefined;
 		disposeState(this);
+	}
+
+	private scheduleAutoSave(delayMilliseconds = 0): void {
+		if (this.$disposed) return;
+		if (this.$saveTimer) clearTimeout(this.$saveTimer);
+		this.clearOperationResult();
+		this.$saveTimer = setTimeout(() => {
+			this.$saveTimer = undefined;
+			void this.flushAutoSave();
+		}, delayMilliseconds);
 	}
 
 	@action private applyLoadedConfig(
@@ -606,6 +666,7 @@ export class ConfigState {
 		this.draft = structuredClone(config ?? createInitialConfig());
 		this.storedCredentialNames = credentials.storedNames;
 		this.pendingCredentialValues = {};
+		this.$credentialNamesReadyToSave.clear();
 		this.phase = 'idle';
 		this.errorMessage = undefined;
 		this.fieldErrors = {};
@@ -613,14 +674,10 @@ export class ConfigState {
 		this.selectFirstCredential();
 	}
 
-	@action private applyStoredCredentials(names: readonly string[]): void {
-		this.storedCredentialNames = [...new Set([...this.storedCredentialNames, ...names])].sort();
-		this.pendingCredentialValues = {};
-	}
-
 	@action private applyDeletedCredential(name: string): void {
 		this.storedCredentialNames = this.storedCredentialNames.filter((item) => item !== name);
 		delete this.pendingCredentialValues[name];
+		this.$credentialNamesReadyToSave.delete(name);
 		this.phase = 'saved';
 		this.errorMessage = undefined;
 	}
@@ -631,20 +688,27 @@ export class ConfigState {
 		this.errorMessage = undefined;
 	}
 
-	@action private applySavedConfig(
-		config: VoxSpellConfig | null,
-		credentials: CredentialsGetStatusResult,
+	@action private applyAutoSaved(
+		config: VoxSpellConfig,
+		credentialEntries: readonly CredentialsUpdateParams['set'][number][],
 	): void {
-		if (!config) throw new Error('Daemon returned an empty configuration after update');
 		this.config = config;
-		this.draft = structuredClone(config);
-		this.storedCredentialNames = credentials.storedNames;
-		this.pendingCredentialValues = {};
-		this.phase = 'saved';
+		if (JSON.stringify(this.draft) === JSON.stringify(config)) {
+			this.draft = structuredClone(config);
+		}
+		const savedNames = credentialEntries.map((entry) => entry.name);
+		this.storedCredentialNames = [
+			...new Set([...this.storedCredentialNames, ...savedNames]),
+		].sort();
+		credentialEntries.forEach(({ name, value }) => {
+			this.$credentialNamesReadyToSave.delete(name);
+			if (this.pendingCredentialValues[name] === value)
+				delete this.pendingCredentialValues[name];
+		});
+		this.phase = this.isDirty ? 'idle' : 'saved';
 		this.errorMessage = undefined;
 		this.fieldErrors = {};
 		this.$loaded = true;
-		this.selectFirstCredential();
 	}
 
 	@action private applyOperationError(error: unknown): void {
@@ -657,7 +721,7 @@ export class ConfigState {
 	}
 
 	private clearOperationResult(): void {
-		this.phase = 'idle';
+		if (this.phase !== 'saving') this.phase = 'idle';
 		this.errorMessage = undefined;
 		this.fieldErrors = {};
 		this.providerTestResult = undefined;
@@ -667,6 +731,7 @@ export class ConfigState {
 		if (!this.draft) throw new Error('Configuration draft is not available');
 		this.draft.polishing ??= {
 			enabled: false,
+			minimumEffectiveCharacters: 6,
 			activeProvider: 'openai',
 			systemPrompt: DEFAULT_POLISH_SYSTEM_PROMPT,
 			providers: [
@@ -708,8 +773,10 @@ function createInitialConfig(): VoxSpellConfig {
 				},
 			],
 		},
+		textProcessing: { trimTrailingPeriod: false },
 		polishing: {
 			enabled: false,
+			minimumEffectiveCharacters: 6,
 			activeProvider: 'openai',
 			systemPrompt: DEFAULT_POLISH_SYSTEM_PROMPT,
 			providers: [

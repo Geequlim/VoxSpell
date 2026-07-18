@@ -1,7 +1,11 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import { InitializeParamsSchema } from '../src/initialize.js';
-import { SessionPhaseParamsSchema, SessionSelectResultParamsSchema } from '../src/session.js';
+import {
+	SessionPhaseParamsSchema,
+	SessionSelectResultParamsSchema,
+	SessionStartParamsSchema,
+} from '../src/session.js';
 import { ProtocolValidationError, validateProtocolValue } from '../src/validation.js';
 
 import type { InitializeParams } from '../src/initialize.js';
@@ -63,5 +67,19 @@ describe('validateProtocolValue', () => {
 				phase: 'preparing',
 			}),
 		).toEqual({ sessionId: SESSION_ID, phase: 'preparing' });
+	});
+
+	it('keeps daemon-owned text processing options out of session.start', () => {
+		expect(
+			validateProtocolValue(SessionStartParamsSchema, {
+				inputContextId: 'input-context-1',
+			}),
+		).toEqual({ inputContextId: 'input-context-1' });
+		expect(() =>
+			validateProtocolValue(SessionStartParamsSchema, {
+				inputContextId: 'input-context-1',
+				trimTrailingPeriod: true,
+			}),
+		).toThrow(ProtocolValidationError);
 	});
 });

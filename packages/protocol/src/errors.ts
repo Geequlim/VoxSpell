@@ -18,6 +18,8 @@ export const ProtocolErrorCodeSchema = Type.Union([
 	Type.Literal('CONFIG_NOT_FOUND'),
 	Type.Literal('CONFIG_INVALID'),
 	Type.Literal('CONFIG_APPLY_FAILED'),
+	Type.Literal('DICTIONARY_INVALID'),
+	Type.Literal('DICTIONARY_APPLY_FAILED'),
 	Type.Literal('CREDENTIAL_MISSING'),
 	Type.Literal('CREDENTIAL_STORE_INVALID'),
 	Type.Literal('PROVIDER_TEST_FAILED'),
@@ -34,6 +36,7 @@ export const ErrorStageSchema = Type.Union([
 	Type.Literal('processing'),
 	Type.Literal('polish'),
 	Type.Literal('config'),
+	Type.Literal('dictionary'),
 	Type.Literal('credential'),
 	Type.Literal('fcitx'),
 ]);

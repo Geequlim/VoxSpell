@@ -39,6 +39,11 @@ export interface DaemonConfigurationStatus {
 	readonly lastError?: string;
 }
 
+export interface TextPolishingPolicy {
+	readonly defaultEnabled: boolean;
+	readonly minimumEffectiveCharacters: number;
+}
+
 export interface DaemonConfigManagerOptions {
 	readonly paths: VoxSpellConfigPaths;
 	readonly environment?: NodeJS.ProcessEnv;
@@ -158,6 +163,19 @@ export class DaemonConfigManager {
 	/** 返回当前启用的 AI 文本润色器。 */
 	getTextPolisher(): TextPolisher | undefined {
 		return this.#textPolisher;
+	}
+
+	/** 返回新会话使用的 AI 润色默认策略。 */
+	getTextPolishingPolicy(): TextPolishingPolicy {
+		return {
+			defaultEnabled: this.#config?.polishing?.enabled ?? false,
+			minimumEffectiveCharacters: this.#config?.polishing?.minimumEffectiveCharacters ?? 0,
+		};
+	}
+
+	/** 返回新会话使用的确定性文本处理配置。 */
+	getTrimTrailingPeriod(): boolean {
+		return this.#config?.textProcessing?.trimTrailingPeriod ?? false;
 	}
 
 	/** 返回当前生效配置的副本。 */

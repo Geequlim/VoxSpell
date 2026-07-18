@@ -59,6 +59,23 @@ export const SessionFinishRequest = new RequestType<SessionParams, EmptyResult, 
 	'session.finish',
 );
 
+export const SessionSetPolishingEnabledParamsSchema = Type.Object(
+	{
+		sessionId: SessionIdSchema,
+		enabled: Type.Boolean(),
+	},
+	{ additionalProperties: false },
+);
+export type SessionSetPolishingEnabledParams = Static<
+	typeof SessionSetPolishingEnabledParamsSchema
+>;
+
+export const SessionSetPolishingEnabledRequest = new RequestType<
+	SessionSetPolishingEnabledParams,
+	EmptyResult,
+	ProtocolErrorData
+>('session.setPolishingEnabled');
+
 export const SessionCancelReasonSchema = Type.Union([
 	Type.Literal('user'),
 	Type.Literal('focus-lost'),
@@ -121,6 +138,19 @@ export type SessionPreviewParams = Static<typeof SessionPreviewParamsSchema>;
 
 export const SessionPreviewNotification = new NotificationType<SessionPreviewParams>(
 	'session.preview',
+);
+
+export const SessionPolishingStateParamsSchema = Type.Object(
+	{
+		sessionId: SessionIdSchema,
+		enabled: Type.Boolean(),
+	},
+	{ additionalProperties: false },
+);
+export type SessionPolishingStateParams = Static<typeof SessionPolishingStateParamsSchema>;
+
+export const SessionPolishingStateNotification = new NotificationType<SessionPolishingStateParams>(
+	'session.polishingState',
 );
 
 export const TranscriptResultSchema = Type.Object(

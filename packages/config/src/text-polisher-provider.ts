@@ -18,13 +18,13 @@ export class TextPolisherProviderConfigError extends Error {
 	}
 }
 
-/** 解析启用的 AI 润色 Provider；功能关闭时不要求任何凭据。 */
+/** 解析已配置的 AI 润色 Provider，不读取默认启用策略。 */
 export function resolveTextPolisherProvider(
 	config: VoxSpellConfig,
 	environment: NodeJS.ProcessEnv,
 ): ResolvedOpenAiCompatibleTextPolisher | undefined {
 	const polishing = config.polishing;
-	if (!polishing?.enabled) return undefined;
+	if (!polishing?.activeProvider) return undefined;
 	const provider = polishing.providers.find(
 		(candidate) => candidate.id === polishing.activeProvider,
 	);
@@ -48,10 +48,10 @@ export function resolveTextPolisherProvider(
 	};
 }
 
-/** 返回当前启用的 AI 润色 Provider 所需凭据名称。 */
+/** 返回当前已配置的 AI 润色 Provider 所需凭据名称。 */
 export function getTextPolisherCredentialNames(config: VoxSpellConfig): readonly string[] {
 	const polishing = config.polishing;
-	if (!polishing?.enabled) return [];
+	if (!polishing?.activeProvider) return [];
 	const provider = polishing.providers.find(
 		(candidate) => candidate.id === polishing.activeProvider,
 	);

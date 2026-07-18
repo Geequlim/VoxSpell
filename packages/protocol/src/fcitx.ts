@@ -12,6 +12,7 @@ export const VoxSpellFcitxConfigSchema = Type.Object(
 		pttKey: Type.String({ minLength: 1 }),
 		holdThresholdMs: Type.Integer({ minimum: 100, maximum: 2000 }),
 		autoSelectResult: Type.Boolean(),
+		polishingToggleKey: Type.String({ minLength: 1 }),
 	},
 	{ additionalProperties: false },
 );

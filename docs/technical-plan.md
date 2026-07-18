@@ -66,6 +66,7 @@ Fcitx 插件不负责：
 - 云端鉴权或 WebSocket 网络请求。
 - 用户词典与数字规则执行。
 - AI 请求。
+- 句号裁剪等确定性文本处理配置。
 - 长耗时任务、阻塞 socket 或子进程管理。
 
 ### 2.3 首版复用系统音频工具
@@ -389,6 +390,13 @@ ASR final
 - 不依赖具体 ASR Provider 的私有结果格式。
 - 所有规则由 table-driven golden tests 覆盖。
 
+句号裁剪由 daemon 主配置持有，并在新会话开始时读取配置快照。Fcitx 插件不保存该选项，`session.start` 也不传递文本处理配置。
+
+```yaml
+textProcessing:
+  trimTrailingPeriod: false
+```
+
 AI 后再次执行词典与数字规则，防止模型改坏术语或重新写回中文数字。
 
 ## 10. AI 润色
@@ -419,6 +427,7 @@ export interface PolishRequest {
 ```yaml
 polishing:
   enabled: true
+  minimumEffectiveCharacters: 6
   activeProvider: openrouter-chat
   systemPrompt: |
     你是语音输入文本润色器。
@@ -431,6 +440,8 @@ polishing:
       model: example/chat-model
       timeoutMilliseconds: 30000
 ```
+
+`minimumEffectiveCharacters` 控制自动润色的最少有效字符数，`0` 表示不限制。该条件只在录音结束后决定是否发起 AI 请求，不影响录音期间的 `✨` 开关标记。录音期间的手动开启会覆盖全局默认值和字符条件，但不会修改持久配置。
 
 输出校验：
 

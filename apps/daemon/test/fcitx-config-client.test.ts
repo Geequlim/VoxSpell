@@ -8,6 +8,7 @@ function createRawConfig(
 	pttKey = 'space',
 	holdThresholdMs = '200',
 	autoSelectResult = 'True',
+	polishingToggleKey = 'Shift_L',
 ): unknown {
 	return [
 		[],
@@ -16,6 +17,7 @@ function createRawConfig(
 				['PTTKey', [[], [pttKey]]],
 				['HoldThresholdMs', [[], [holdThresholdMs]]],
 				['AutoSelectResult', [[], [autoSelectResult]]],
+				['PolishingToggleKey', [[], [polishingToggleKey]]],
 			],
 		],
 	];
@@ -33,6 +35,7 @@ describe('FcitxConfigClient', () => {
 			pttKey: 'Control+space',
 			holdThresholdMs: 350,
 			autoSelectResult: false,
+			polishingToggleKey: 'Shift_L',
 		});
 	});
 
@@ -45,9 +48,10 @@ describe('FcitxConfigClient', () => {
 					['PTTKey', ['s', 'Control+space']],
 					['HoldThresholdMs', ['s', '350']],
 					['AutoSelectResult', ['s', 'False']],
+					['PolishingToggleKey', ['s', 'Shift_R']],
 				],
 			]);
-			rawConfig = createRawConfig('Control+space', '350', 'False');
+			rawConfig = createRawConfig('Control+space', '350', 'False', 'Shift_R');
 		});
 		const client = new FcitxConfigClient({
 			getConfig: async () => rawConfig,
@@ -58,6 +62,7 @@ describe('FcitxConfigClient', () => {
 			pttKey: 'Control+space',
 			holdThresholdMs: 350,
 			autoSelectResult: false,
+			polishingToggleKey: 'Shift_R',
 		});
 
 		expect(setConfig).toHaveBeenCalledOnce();

@@ -25,6 +25,14 @@ FCITX_CONFIGURATION(
 		this,
 		"AutoSelectResult",
 		"自动选择推荐结果",
-		true};);
+		true};
+	fcitx::Option<fcitx::Key, fcitx::KeyConstrain> polishingToggleKey{
+		this,
+		"PolishingToggleKey",
+		"本轮润色切换键",
+		fcitx::Key(FcitxKey_Shift_L),
+		fcitx::KeyConstrain(fcitx::KeyConstrainFlags{
+			fcitx::KeyConstrainFlag::AllowModifierOnly,
+			fcitx::KeyConstrainFlag::AllowModifierLess})};);
 
 } // namespace voxspell

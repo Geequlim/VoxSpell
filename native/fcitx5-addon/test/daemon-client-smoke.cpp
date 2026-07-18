@@ -84,7 +84,10 @@ int main(int argc, char **argv) {
 				failed = true;
 				eventLoop.exit();
 			},
-			.error = [&](const std::string &, const std::string &message) {
+			.error = [&](
+				const std::string &,
+				const std::string &message,
+				const std::optional<voxspell::protocol::ProtocolErrorData> &) {
 				std::cerr << message << '\n';
 				failed = true;
 				eventLoop.exit();

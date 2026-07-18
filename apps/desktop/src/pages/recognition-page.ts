@@ -36,13 +36,8 @@ class RecognitionPageView {
 	readonly providerRow: InstanceType<typeof Adw.ComboRow>;
 	@bind.prop('subtitle', (state) => state.providerTypeTitle)
 	readonly providerTypeRow: InstanceType<typeof Adw.ActionRow>;
-	@bind.prop('text', (state) => state.providerId)
-	@bind.prop('title', (state) => getFieldTitle('服务标识', state.fieldErrors.providerId))
-	@bind.listen<InstanceType<typeof Adw.EntryRow>>('changed', (state, row) =>
-		state.updateProviderId(row.text),
-	)
-	@bind.sensitive((state) => state.isEditable)
-	readonly providerIdRow: InstanceType<typeof Adw.EntryRow>;
+	@bind.prop('subtitle', (state) => state.providerId)
+	readonly providerIdRow: InstanceType<typeof Adw.ActionRow>;
 	@bind.prop('text', (state) => state.baseUrl)
 	@bind.prop('title', (state) => getFieldTitle('API 地址', state.fieldErrors.baseUrl))
 	@bind.listen<InstanceType<typeof Adw.EntryRow>>('changed', (state, row) =>
@@ -75,6 +70,12 @@ class RecognitionPageView {
 	@bind.visible((state) => state.showsTencentFields)
 	@bind.sensitive((state) => state.isEditable)
 	readonly engineModelRow: InstanceType<typeof Adw.EntryRow>;
+	@bind.prop('active', (state) => state.trimTrailingPeriod)
+	@bind.listen<InstanceType<typeof Adw.SwitchRow>>('notify::active', (state, row) =>
+		state.updateTrimTrailingPeriod(row.active),
+	)
+	@bind.sensitive((state) => state.isEditable)
+	readonly trimTrailingPeriodRow: InstanceType<typeof Adw.SwitchRow>;
 	@bind.render<InstanceType<typeof Adw.ComboRow>>((state, row, self) => {
 		self.$updatingCredential = true;
 		if (!hasSameItems(self.$credentialItems, state.requiredCredentialNames)) {
@@ -102,9 +103,16 @@ class RecognitionPageView {
 	@bind.listen<InstanceType<typeof Adw.PasswordEntryRow>>('changed', (state, row) =>
 		state.updateSelectedCredential(row.text),
 	)
+	@bind.listen<InstanceType<typeof Adw.PasswordEntryRow>>('entry-activated', (state) =>
+		state.commitSelectedCredential(),
+	)
 	@bind.visible((state) => state.requiredCredentialNames.length > 0)
 	@bind.sensitive((state) => state.isEditable)
 	readonly credentialValueRow: InstanceType<typeof Adw.PasswordEntryRow>;
+	@bind.listen<InstanceType<typeof Gtk.EventControllerFocus>>('leave', (state) =>
+		state.commitSelectedCredential(),
+	)
+	readonly credentialFocusController: InstanceType<typeof Gtk.EventControllerFocus>;
 	@bind.prop('subtitle', (state) => state.selectedCredentialStatus)
 	readonly credentialStatusRow: InstanceType<typeof Adw.ActionRow>;
 	@bind.sensitive((state) => state.canDeleteCredential)
@@ -139,12 +147,6 @@ class RecognitionPageView {
 	readonly operationRow: InstanceType<typeof Adw.ActionRow>;
 	@bind.visible((state) => state.phase === 'error')
 	readonly operationErrorIcon: InstanceType<typeof Gtk.Image>;
-	@bind.sensitive((state) => state.isEditable && state.isDirty && state.phase !== 'saving')
-	@bind.click((state) => state.discard())
-	readonly discardButton: InstanceType<typeof Gtk.Button>;
-	@bind.sensitive((state) => state.canReload)
-	@bind.click((state) => void state.load())
-	readonly reloadButton: InstanceType<typeof Gtk.Button>;
 	@bind.sensitive((state) => state.canDeleteProvider)
 	@bind.click((state, _button, self) =>
 		showDeleteConfirmation(
@@ -158,9 +160,6 @@ class RecognitionPageView {
 	@bind.sensitive((state) => state.canTestProvider)
 	@bind.click((state) => void state.testProvider())
 	readonly testProviderButton: InstanceType<typeof Gtk.Button>;
-	@bind.sensitive((state) => state.canSave)
-	@bind.click((state) => void state.save())
-	readonly saveButton: InstanceType<typeof Gtk.Button>;
 
 	constructor(
 		root: InstanceType<typeof Adw.PreferencesPage>,
@@ -168,13 +167,15 @@ class RecognitionPageView {
 		credentialModel: InstanceType<typeof Gtk.StringList>,
 		providerRow: InstanceType<typeof Adw.ComboRow>,
 		providerTypeRow: InstanceType<typeof Adw.ActionRow>,
-		providerIdRow: InstanceType<typeof Adw.EntryRow>,
+		providerIdRow: InstanceType<typeof Adw.ActionRow>,
 		baseUrlRow: InstanceType<typeof Adw.EntryRow>,
 		modelRow: InstanceType<typeof Adw.EntryRow>,
 		apiKeyEnvironmentRow: InstanceType<typeof Adw.EntryRow>,
 		engineModelRow: InstanceType<typeof Adw.EntryRow>,
+		trimTrailingPeriodRow: InstanceType<typeof Adw.SwitchRow>,
 		credentialNameRow: InstanceType<typeof Adw.ComboRow>,
 		credentialValueRow: InstanceType<typeof Adw.PasswordEntryRow>,
+		credentialFocusController: InstanceType<typeof Gtk.EventControllerFocus>,
 		credentialStatusRow: InstanceType<typeof Adw.ActionRow>,
 		deleteCredentialButton: InstanceType<typeof Gtk.Button>,
 		newProviderIdRow: InstanceType<typeof Adw.EntryRow>,
@@ -182,11 +183,8 @@ class RecognitionPageView {
 		addProviderButton: InstanceType<typeof Gtk.Button>,
 		operationRow: InstanceType<typeof Adw.ActionRow>,
 		operationErrorIcon: InstanceType<typeof Gtk.Image>,
-		discardButton: InstanceType<typeof Gtk.Button>,
-		reloadButton: InstanceType<typeof Gtk.Button>,
 		deleteProviderButton: InstanceType<typeof Gtk.Button>,
 		testProviderButton: InstanceType<typeof Gtk.Button>,
-		saveButton: InstanceType<typeof Gtk.Button>,
 	) {
 		this.root = root;
 		this.$providerModel = providerModel;
@@ -198,8 +196,10 @@ class RecognitionPageView {
 		this.modelRow = modelRow;
 		this.apiKeyEnvironmentRow = apiKeyEnvironmentRow;
 		this.engineModelRow = engineModelRow;
+		this.trimTrailingPeriodRow = trimTrailingPeriodRow;
 		this.credentialNameRow = credentialNameRow;
 		this.credentialValueRow = credentialValueRow;
+		this.credentialFocusController = credentialFocusController;
 		this.credentialStatusRow = credentialStatusRow;
 		this.deleteCredentialButton = deleteCredentialButton;
 		this.newProviderIdRow = newProviderIdRow;
@@ -207,11 +207,8 @@ class RecognitionPageView {
 		this.addProviderButton = addProviderButton;
 		this.operationRow = operationRow;
 		this.operationErrorIcon = operationErrorIcon;
-		this.discardButton = discardButton;
-		this.reloadButton = reloadButton;
 		this.deleteProviderButton = deleteProviderButton;
 		this.testProviderButton = testProviderButton;
-		this.saveButton = saveButton;
 	}
 }
 
@@ -226,7 +223,7 @@ export function createRecognitionPage(
 		model: providerModel,
 	});
 	const providerTypeRow = new Adw.ActionRow({ title: '接口类型', subtitle: '' });
-	const providerIdRow = createFormEntryRow('服务标识');
+	const providerIdRow = new Adw.ActionRow({ title: '服务标识', subtitle: '' });
 	const baseUrlRow = createFormEntryRow('API 地址');
 	const modelRow = createFormEntryRow('模型');
 	const apiKeyEnvironmentRow = createFormEntryRow('凭据名称');
@@ -242,6 +239,12 @@ export function createRecognitionPage(
 	providerGroup.add(modelRow);
 	providerGroup.add(apiKeyEnvironmentRow);
 	providerGroup.add(engineModelRow);
+	const trimTrailingPeriodRow = new Adw.SwitchRow({
+		title: '裁剪尾部句号',
+		subtitle: '提交前移除末尾的中文句号或单个英文句号。',
+	});
+	const textProcessingGroup = new Adw.PreferencesGroup({ title: '文本处理' });
+	textProcessingGroup.add(trimTrailingPeriodRow);
 
 	const credentialModel = Gtk.StringList.new([]);
 	const credentialNameRow = new Adw.ComboRow({
@@ -250,6 +253,8 @@ export function createRecognitionPage(
 		model: credentialModel,
 	});
 	const credentialValueRow = createFormPasswordEntryRow('更新凭据');
+	const credentialFocusController = new Gtk.EventControllerFocus();
+	credentialValueRow.addController(credentialFocusController);
 	const credentialStatusRow = new Adw.ActionRow({ title: '凭据状态', subtitle: '' });
 	const deleteCredentialButton = new Gtk.Button({
 		label: '删除凭据',
@@ -289,28 +294,18 @@ export function createRecognitionPage(
 		iconName: 'dialog-error-symbolic',
 		cssClasses: ['error'],
 	});
-	const operationRow = new Adw.ActionRow({ title: '状态', subtitle: '' });
+	const operationRow = new Adw.ActionRow({ title: '自动保存', subtitle: '' });
 	operationRow.addPrefix(operationErrorIcon);
-	const reloadButton = new Gtk.Button({ label: '重新加载', valign: Gtk.Align.CENTER });
 	const deleteProviderButton = new Gtk.Button({
 		label: '删除识别服务',
 		valign: Gtk.Align.CENTER,
 		cssClasses: ['destructive-action'],
 	});
 	const testProviderButton = new Gtk.Button({ label: '测试连接', valign: Gtk.Align.CENTER });
-	const discardButton = new Gtk.Button({ label: '撤销', valign: Gtk.Align.CENTER });
-	const saveButton = new Gtk.Button({
-		label: '保存',
-		valign: Gtk.Align.CENTER,
-		cssClasses: ['suggested-action'],
-	});
 	const buttonBox = new Gtk.Box({ orientation: Gtk.Orientation.HORIZONTAL, spacing: 8 });
-	buttonBox.append(reloadButton);
 	buttonBox.append(deleteProviderButton);
 	buttonBox.append(testProviderButton);
-	buttonBox.append(discardButton);
-	buttonBox.append(saveButton);
-	const actionRow = new Adw.ActionRow({ title: '保存更改' });
+	const actionRow = new Adw.ActionRow({ title: '识别服务操作' });
 	actionRow.addSuffix(buttonBox);
 	const actionGroup = new Adw.PreferencesGroup();
 	actionGroup.add(operationRow);
@@ -318,6 +313,7 @@ export function createRecognitionPage(
 
 	const root = new Adw.PreferencesPage({ title: '语音识别' });
 	root.add(providerGroup);
+	root.add(textProcessingGroup);
 	root.add(credentialGroup);
 	root.add(providerManagementGroup);
 	root.add(actionGroup);
@@ -332,8 +328,10 @@ export function createRecognitionPage(
 		modelRow,
 		apiKeyEnvironmentRow,
 		engineModelRow,
+		trimTrailingPeriodRow,
 		credentialNameRow,
 		credentialValueRow,
+		credentialFocusController,
 		credentialStatusRow,
 		deleteCredentialButton,
 		newProviderIdRow,
@@ -341,11 +339,8 @@ export function createRecognitionPage(
 		addProviderButton,
 		operationRow,
 		operationErrorIcon,
-		discardButton,
-		reloadButton,
 		deleteProviderButton,
 		testProviderButton,
-		saveButton,
 	);
 	view.state = state;
 	return root;

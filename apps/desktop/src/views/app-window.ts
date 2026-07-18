@@ -4,6 +4,7 @@ import { createAboutPage } from '../pages/about-page';
 import { createAiPolishingPage } from '../pages/ai-polishing-page';
 import { createDiagnosticsPage } from '../pages/diagnostics-page';
 import { createInputBehaviorPage } from '../pages/input-behavior-page';
+import { createDictionaryPage } from '../pages/dictionary-page';
 import { createOverviewPage } from '../pages/overview-page';
 import { pageDefinitions } from '../pages/page-definition';
 import { createRecognitionPage } from '../pages/recognition-page';
@@ -17,6 +18,7 @@ const createPage = {
 	overview: (state: DesktopState) => createOverviewPage(state),
 	recognition: (state: DesktopState) => createRecognitionPage(state.config),
 	'input-behavior': (state: DesktopState) => createInputBehaviorPage(state.inputBehavior),
+	dictionary: (state: DesktopState) => createDictionaryPage(state.dictionary),
 	'ai-polishing': (state: DesktopState) => createAiPolishingPage(state.config),
 	diagnostics: (state: DesktopState) => createDiagnosticsPage(state.daemon),
 	about: () => createAboutPage(),
@@ -111,5 +113,18 @@ export function createAppWindow(
 	viewRows.forEach(([row, page]) => view.pageByRow.set(row, page));
 	view.state = state;
 	navigationList.selectRow(viewRows[0]?.[0] ?? null);
+	let closingAfterFlush = false;
+	window.on('close-request', () => {
+		if (closingAfterFlush) return false;
+		void state
+			.flushPendingChanges()
+			.then(() => {
+				if (state.config.isDirty || state.inputBehavior.isDirty) return;
+				closingAfterFlush = true;
+				window.close();
+			})
+			.catch(() => undefined);
+		return true;
+	});
 	return window;
 }

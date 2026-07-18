@@ -5,10 +5,12 @@ import { DaemonSessionGate } from '../src/session-gate.js';
 import { FakeAudioCaptureBackend } from './fakes/fake-audio-capture.js';
 import { FakeRealtimeAsrProvider } from './fakes/fake-realtime-asr.js';
 import { FakeTextPolisher } from './fakes/fake-text-polisher.js';
+import { CompiledVoiceDictionary } from '@voxspell/text-pipeline/voice-dictionary';
 
 import type { TextPolisher } from '@voxspell/ai-polisher/text-polisher';
 import type { TextPipeline } from '@voxspell/text-pipeline/text-pipeline';
 import type { DaemonSessionEvent, SessionCoordinatorOptions } from '../src/session-coordinator.js';
+import type { SessionFailureDiagnostic } from '../src/session-coordinator.js';
 
 const SESSION_ID = '0190c95b-7f28-7b12-8b6f-a4d3fd239013';
 const NEXT_SESSION_ID = '0190c95b-7f28-7b12-8b6f-a4d3fd239014';
@@ -17,6 +19,7 @@ interface TestContext {
 	readonly captureBackend: FakeAudioCaptureBackend;
 	readonly asrProvider: FakeRealtimeAsrProvider;
 	readonly events: DaemonSessionEvent[];
+	readonly failures: SessionFailureDiagnostic[];
 	readonly coordinator: SessionCoordinator;
 }
 
@@ -25,7 +28,9 @@ interface TestContextOptions {
 	readonly textPipeline?: TextPipeline;
 	readonly textPolisher?: TextPolisher;
 	readonly getTextPolisher?: () => TextPolisher | undefined;
-	readonly getPolishDictionary?: SessionCoordinatorOptions['getPolishDictionary'];
+	readonly getTextPolishingPolicy?: SessionCoordinatorOptions['getTextPolishingPolicy'];
+	readonly getTrimTrailingPeriod?: SessionCoordinatorOptions['getTrimTrailingPeriod'];
+	readonly getDictionary?: SessionCoordinatorOptions['getDictionary'];
 	readonly sessionGate?: DaemonSessionGate;
 }
 
@@ -35,15 +40,19 @@ function createTestContext(options: TestContextOptions = {}): TestContext {
 	const captureBackend = new FakeAudioCaptureBackend();
 	const asrProvider = new FakeRealtimeAsrProvider();
 	const events: DaemonSessionEvent[] = [];
+	const failures: SessionFailureDiagnostic[] = [];
 	const coordinator = new SessionCoordinator({
 		captureBackend,
 		asrProvider,
 		textPipeline: options.textPipeline,
 		textPolisher: options.textPolisher,
 		getTextPolisher: options.getTextPolisher,
-		getPolishDictionary: options.getPolishDictionary,
+		getTextPolishingPolicy: options.getTextPolishingPolicy,
+		getTrimTrailingPeriod: options.getTrimTrailingPeriod,
+		getDictionary: options.getDictionary,
 		sessionGate: options.sessionGate,
 		publish: (event) => events.push(event),
+		onFailure: (diagnostic) => failures.push(diagnostic),
 		createSessionId: () => {
 			const sessionId = sessionIds.shift();
 			if (!sessionId) throw new Error('No fake session ID available');
@@ -51,7 +60,7 @@ function createTestContext(options: TestContextOptions = {}): TestContext {
 		},
 	});
 
-	return { captureBackend, asrProvider, events, coordinator };
+	return { captureBackend, asrProvider, events, failures, coordinator };
 }
 
 /** 推进 fake 会话到确定性文本处理阶段。 */
@@ -65,8 +74,12 @@ describe('SessionCoordinator', () => {
 		const context = createTestContext();
 		const start = context.coordinator.start('input-context-1');
 
-		expect(context.events).toEqual([
+		expect(context.events.slice(0, 2)).toEqual([
 			{ method: 'session.phase', params: { sessionId: SESSION_ID, phase: 'preparing' } },
+			{
+				method: 'session.polishingState',
+				params: { sessionId: SESSION_ID, enabled: false },
+			},
 		]);
 		await expect(start).resolves.toEqual({ sessionId: SESSION_ID });
 		expect(context.events.at(-1)).toEqual({
@@ -91,6 +104,25 @@ describe('SessionCoordinator', () => {
 			sessionId: SESSION_ID,
 		});
 		await second.coordinator.cancel(SESSION_ID, 'user');
+	});
+
+	it('reports configuration failures before a session can start', async () => {
+		const failures: SessionFailureDiagnostic[] = [];
+		const coordinator = new SessionCoordinator({
+			captureBackend: new FakeAudioCaptureBackend(),
+			onFailure: (diagnostic) => failures.push(diagnostic),
+		});
+
+		await expect(coordinator.start('input-context-1')).rejects.toMatchObject({
+			data: { code: 'NOT_CONFIGURED', stage: 'config' },
+		});
+		expect(failures).toEqual([
+			{
+				sessionId: undefined,
+				phase: 'idle',
+				error: { code: 'NOT_CONFIGURED', stage: 'config', retryable: false },
+			},
+		]);
 	});
 
 	it('publishes corrected preview snapshots and completes without AI polish', async () => {
@@ -156,25 +188,36 @@ describe('SessionCoordinator', () => {
 
 	it('publishes full polished snapshots and exposes both final results', async () => {
 		const polisher = new FakeTextPolisher();
-		const dictionary = [{ canonical: 'Codex', aliases: ['扣得克斯'] }];
+		const dictionary = new CompiledVoiceDictionary({
+			version: 1,
+			entries: [
+				{ term: 'Codex', aliases: ['扣得克斯'], protect: true, boost: 10, enabled: true },
+			],
+		});
 		const pipeline: TextPipeline = {
-			processTranscript: async (text) => `识别:${text}`,
+			processTranscript: async (request) => {
+				expect(request.dictionary).toBe(dictionary);
+				return `识别:${request.text}`;
+			},
 			processPolished: async (request) => {
-				expect(request.dictionary).toEqual(dictionary);
+				expect(request.dictionary).toBe(dictionary);
 				return `润色:${request.polished}`;
 			},
 		};
 		const context = createTestContext({
 			textPipeline: pipeline,
 			textPolisher: polisher,
-			getPolishDictionary: () => dictionary,
+			getDictionary: () => dictionary,
 		});
 		await context.coordinator.start('input-context-1');
 		await completeAsr(context, '原始输入');
 		await vi.waitFor(() => expect(context.coordinator.state).toBe('polishing'));
 		const polishSession = polisher.sessions[0];
 
-		expect(polishSession.request).toEqual({ text: '识别:原始输入', dictionary });
+		expect(polishSession.request).toEqual({
+			text: '识别:原始输入',
+			dictionary: dictionary.entries,
+		});
 		polishSession.emit({ type: 'delta', text: '更自然' });
 		polishSession.emit({ type: 'delta', text: '的表达' });
 		polishSession.emit({ type: 'completed' });
@@ -213,6 +256,95 @@ describe('SessionCoordinator', () => {
 		expect(context.events.at(-1)).toMatchObject({
 			method: 'session.completed',
 			params: { selectedChoiceId: 'polished', text: '润色:更自然的表达' },
+		});
+	});
+
+	it('skips automatic polishing when the transcript is shorter than the configured threshold', async () => {
+		const polisher = new FakeTextPolisher();
+		const context = createTestContext({
+			textPolisher: polisher,
+			getTextPolishingPolicy: () => ({
+				defaultEnabled: true,
+				minimumEffectiveCharacters: 4,
+			}),
+		});
+		await context.coordinator.start('input-context-1');
+		expect(
+			context.events
+				.filter((event) => event.method === 'session.polishingState')
+				.map((event) => event.params.enabled),
+		).toEqual([true]);
+		await completeAsr(context, '好的');
+		await vi.waitFor(() => expect(context.coordinator.state).toBe('idle'));
+
+		expect(polisher.sessions).toHaveLength(0);
+		expect(context.events.at(-1)).toMatchObject({
+			method: 'session.completed',
+			params: { selectedChoiceId: 'transcript', text: '好的' },
+		});
+	});
+
+	it('allows repeated recording-time switches to force polishing when globally disabled', async () => {
+		const polisher = new FakeTextPolisher();
+		const context = createTestContext({
+			textPolisher: polisher,
+			getTextPolishingPolicy: () => ({
+				defaultEnabled: false,
+				minimumEffectiveCharacters: 20,
+			}),
+		});
+		await context.coordinator.start('input-context-1');
+		context.coordinator.setPolishingEnabled(SESSION_ID, true);
+		context.coordinator.setPolishingEnabled(SESSION_ID, false);
+		context.coordinator.setPolishingEnabled(SESSION_ID, true);
+
+		expect(
+			context.events
+				.filter((event) => event.method === 'session.polishingState')
+				.map((event) => event.params.enabled),
+		).toEqual([false, true, false, true]);
+
+		await completeAsr(context, '短文本');
+		await vi.waitFor(() => expect(context.coordinator.state).toBe('polishing'));
+		expect(polisher.sessions).toHaveLength(1);
+		await context.coordinator.cancel(SESSION_ID, 'user');
+	});
+
+	it('keeps the recording polish marker enabled regardless of realtime text length', async () => {
+		const context = createTestContext({
+			textPolisher: new FakeTextPolisher(),
+			getTextPolishingPolicy: () => ({
+				defaultEnabled: true,
+				minimumEffectiveCharacters: 4,
+			}),
+		});
+		await context.coordinator.start('input-context-1');
+		const asr = context.asrProvider.sessions[0];
+		asr.emit({ type: 'partial', segmentId: 'segment-1', revision: 0, text: '你好' });
+		asr.emit({ type: 'partial', segmentId: 'segment-1', revision: 1, text: '你好世界' });
+
+		await vi.waitFor(() =>
+			expect(
+				context.events.filter((event) => event.method === 'session.preview'),
+			).toHaveLength(2),
+		);
+		expect(
+			context.events
+				.filter((event) => event.method === 'session.polishingState')
+				.map((event) => event.params.enabled),
+		).toEqual([true]);
+		await context.coordinator.cancel(SESSION_ID, 'user');
+	});
+
+	it('applies trailing-period trimming to the committed transcript', async () => {
+		const context = createTestContext({ getTrimTrailingPeriod: () => true });
+		await context.coordinator.start('input-context-1');
+		await completeAsr(context, '你好。');
+		await vi.waitFor(() => expect(context.coordinator.state).toBe('idle'));
+
+		expect(context.events.at(-1)).toMatchObject({
+			method: 'session.completed',
+			params: { text: '你好' },
 		});
 	});
 
@@ -271,6 +403,18 @@ describe('SessionCoordinator', () => {
 		});
 
 		await vi.waitFor(() => expect(context.coordinator.state).toBe('idle'));
+		expect(context.failures).toEqual([
+			{
+				sessionId: SESSION_ID,
+				phase: 'recording',
+				error: {
+					code: 'ASR_FAILED',
+					stage: 'asr',
+					retryable: true,
+					providerCode: 'FAKE_UNAVAILABLE',
+				},
+			},
+		]);
 		expect(context.events.at(-1)).toEqual({
 			method: 'session.error',
 			params: {

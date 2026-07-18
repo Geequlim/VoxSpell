@@ -1,0 +1,37 @@
+version: 1
+entries:
+  - term: VoxSpell
+    aliases:
+      - voice spell
+      - Vox Spell
+    protect: true
+    boost: 10
+    enabled: true
+  - term: Codex
+    aliases:
+      - code x
+      - 扣得克斯
+    protect: true
+    boost: 9
+    enabled: true
+  - term: OpenRouter
+    aliases:
+      - open router
+      - 欧盆路由
+    protect: true
+    boost: 8
+    enabled: true
+  - term: TypeScript
+    aliases:
+      - type script
+      - 太普斯克里普特
+    protect: true
+    boost: 8
+    enabled: true
+  - term: Fcitx 5
+    aliases:
+      - fcitx five
+      - 小企鹅输入法
+    protect: true
+    boost: 7
+    enabled: true

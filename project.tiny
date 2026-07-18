@@ -2,11 +2,11 @@ develop:
   actions:
     - name: dev
       description: 启动 daemon 开发环境
-      command: VOXSPELL_DETERMINISTIC=1 yarn --cwd apps/daemon rspack build --env watch=true,run=true,debug=true
+      command: VOXSPELL_DETERMINISTIC=1 VOXSPELL_DICTIONARY_PATH=../../configs/dictionary.yaml yarn --cwd apps/daemon rspack build --env watch=true,run=true,debug=true
       actions:
         - name: asr
           description: 使用 config.yaml 中的真实 ASR Provider 启动 daemon 开发环境
-          command: VOXSPELL_CONFIG_PATH=../../configs/config.yaml yarn --cwd apps/daemon rspack build --env watch=true,run=true,debug=true
+          command: VOXSPELL_CONFIG_PATH=../../configs/config.yaml VOXSPELL_DICTIONARY_PATH=../../configs/dictionary.yaml yarn --cwd apps/daemon rspack build --env watch=true,run=true,debug=true
     - name: start
       description: 运行已构建的 daemon bundle
       command: yarn --cwd apps/daemon node --enable-source-maps dist/index.cjs

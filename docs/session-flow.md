@@ -24,6 +24,8 @@ preparing -> recording -> recognizing -> processing -> polishing -> choosing
 
 `preparing` 表示 daemon 正在连接 ASR 并初始化麦克风，此时客户端不能提示用户讲话。`recording` 仅在 ASR 与麦克风均已就绪后发送，是客户端提示“请开始讲话”的唯一依据。`polishing` 和 `choosing` 仅在启用 AI 润色时出现；结束录音和资源清理等内部状态不暴露给客户端。
 
+daemon 在录音期间通过 `session.polishingState` 推送本轮润色开关状态。客户端只在状态为开启时显示 `✨`，标记不随实时识别字数变化。用户可通过配置的切换键反复调用 `session.setPolishingEnabled`；手动开启可覆盖全局关闭和最少字符条件，状态只影响当前会话。最少字符条件仅在录音结束后决定自动模式是否发起 AI 请求。
+
 `preparing` 可能在 `session.start` 请求仍处于 pending 时到达；通知携带的 `sessionId` 与随后成功响应中的 ID 相同。客户端必须正常处理请求完成前到达的会话通知，并且只能在收到 `recording` 后播放开始讲话提示。若准备失败，daemon 发送 `session.error`，同时 `session.start` 返回错误。
 
 ## 2. 文本数据
@@ -102,6 +104,7 @@ daemon.ready       daemon 已可用
 session.phase      更新会话阶段
 session.preview    整体替换实时识别文本
 session.results    整体替换识别与润色结果
+session.polishingState 更新本轮润色标记
 session.completed  提交唯一一次最终文本
 session.error      清理会话并展示错误
 ```

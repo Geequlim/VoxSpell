@@ -94,7 +94,7 @@ function disposeTestState(state: TestState): void {
 }
 
 describe('ConfigState', () => {
-	it('loads, edits and saves configuration and credentials in order', async () => {
+	it('loads, edits and automatically saves configuration and credentials in order', async () => {
 		const state = createTestState();
 		await vi.waitFor(() => expect(state.config.draft).toBeDefined());
 		expect(state.config.model).toBe('old-model');
@@ -103,9 +103,10 @@ describe('ConfigState', () => {
 		expect(state.config.selectedCredentialStatus).toBe('由 daemon 运行环境提供');
 
 		state.config.updateModel('new-model');
+		state.config.updateTrimTrailingPeriod(true);
 		state.config.updateSelectedCredential('new-secret');
 		expect(state.config.isDirty).toBe(true);
-		await state.config.save();
+		await state.config.flushPendingChanges();
 
 		expect(state.client.updateCredentials).toHaveBeenCalledWith({
 			set: [{ name: 'OPENROUTER_API_KEY', value: 'new-secret' }],
@@ -121,6 +122,7 @@ describe('ConfigState', () => {
 				asr: expect.objectContaining({
 					providers: [expect.objectContaining({ model: 'new-model' })],
 				}),
+				textProcessing: { trimTrailingPeriod: true },
 			}),
 		);
 		expect(state.client.updateCredentials.mock.invocationCallOrder[0]).toBeLessThan(
@@ -132,7 +134,7 @@ describe('ConfigState', () => {
 		disposeTestState(state);
 	});
 
-	it('creates and saves editable AI polishing configuration', async () => {
+	it('creates and automatically saves editable AI polishing configuration', async () => {
 		const state = createTestState();
 		await vi.waitFor(() => expect(state.config.draft).toBeDefined());
 
@@ -142,7 +144,7 @@ describe('ConfigState', () => {
 		state.config.updatePolishingApiKeyEnvironment('CHAT_API_KEY');
 		state.config.updatePolishingCredential('chat-secret');
 		state.config.updatePolishingSystemPrompt('只返回润色后的正文。');
-		await state.config.save();
+		await state.config.flushPendingChanges();
 
 		expect(state.client.updateCredentials).toHaveBeenCalledWith({
 			set: [{ name: 'CHAT_API_KEY', value: 'chat-secret' }],
@@ -152,6 +154,7 @@ describe('ConfigState', () => {
 			expect.objectContaining({
 				polishing: {
 					enabled: true,
+					minimumEffectiveCharacters: 6,
 					activeProvider: 'openai',
 					systemPrompt: '只返回润色后的正文。',
 					providers: [
@@ -173,7 +176,7 @@ describe('ConfigState', () => {
 		await vi.waitFor(() => expect(state.config.draft).toBeDefined());
 		state.config.updateBaseUrl('not-a-url');
 
-		await state.config.save();
+		await state.config.flushPendingChanges();
 
 		expect(state.config.phase).toBe('error');
 		expect(state.config.fieldErrors.baseUrl).toContain('HTTP');
@@ -190,7 +193,7 @@ describe('ConfigState', () => {
 		state.config.updatePolishingEnabled(true);
 		state.config.updatePolishingBaseUrl('invalid');
 
-		await state.config.save();
+		await state.config.flushPendingChanges();
 
 		expect(state.config.operationTitle).toBe('配置有 2 项需要修正');
 		expect(state.config.operationDescription).toContain('AI 润色 API 地址');

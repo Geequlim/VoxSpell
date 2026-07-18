@@ -35,6 +35,15 @@ describe('VoxSpell config', () => {
 		});
 	});
 
+	it('accepts daemon-owned deterministic text processing options', () => {
+		const config = parseVoxSpellConfig({
+			...validConfig,
+			textProcessing: { trimTrailingPeriod: true },
+		});
+
+		expect(config.textProcessing?.trimTrailingPeriod).toBe(true);
+	});
+
 	it('rejects an unknown active provider', () => {
 		expect(() =>
 			parseVoxSpellConfig({
@@ -136,6 +145,30 @@ describe('VoxSpell config', () => {
 
 		expect(resolveTextPolisherProvider(config, {})).toBeUndefined();
 		expect(getTextPolisherCredentialNames(config)).toEqual([]);
+	});
+
+	it('resolves a configured text polisher while automatic polishing is disabled', () => {
+		const config = parseVoxSpellConfig({
+			...validConfig,
+			polishing: {
+				enabled: false,
+				minimumEffectiveCharacters: 6,
+				activeProvider: 'chat',
+				systemPrompt: '只返回润色文本。',
+				providers: [
+					{
+						id: 'chat',
+						type: 'openai-compatible-chat',
+						baseUrl: 'https://openrouter.ai/api/v1',
+						apiKeyEnvironment: 'CHAT_API_KEY',
+						model: 'example/chat',
+					},
+				],
+			},
+		});
+
+		expect(resolveTextPolisherProvider(config, { CHAT_API_KEY: 'secret' })?.id).toBe('chat');
+		expect(getTextPolisherCredentialNames(config)).toEqual(['CHAT_API_KEY']);
 	});
 
 	it('rejects enabled polishing without an active provider', () => {
