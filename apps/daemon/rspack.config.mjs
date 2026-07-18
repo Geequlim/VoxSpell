@@ -81,6 +81,7 @@ export default function createRspackConfig(environment = {}) {
 		devtool: 'source-map',
 		externalsPresets: { node: true },
 		externals: {
+			'@homebridge/dbus-native': 'commonjs @homebridge/dbus-native',
 			bufferutil: 'commonjs bufferutil',
 			'utf-8-validate': 'commonjs utf-8-validate',
 		},

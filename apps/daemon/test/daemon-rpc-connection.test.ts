@@ -1,6 +1,20 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { DaemonPingRequest, DaemonReadyNotification } from '@voxspell/protocol/daemon';
+import {
+	DaemonGetStatusRequest,
+	DaemonPingRequest,
+	DaemonReadyNotification,
+} from '@voxspell/protocol/daemon';
+import {
+	ConfigGetRequest,
+	ConfigUpdateRequest,
+	ConfigValidateRequest,
+} from '@voxspell/protocol/config';
+import {
+	CredentialsGetStatusRequest,
+	CredentialsUpdateRequest,
+} from '@voxspell/protocol/credentials';
+import { FcitxGetConfigRequest, FcitxUpdateConfigRequest } from '@voxspell/protocol/fcitx';
 import { DAEMON_ERROR_CODE } from '@voxspell/protocol/errors';
 import { InitializeRequest } from '@voxspell/protocol/initialize';
 import {
@@ -15,6 +29,7 @@ import {
 	SessionStartRequest,
 } from '@voxspell/protocol/session';
 import { ErrorCodes } from 'vscode-jsonrpc/node';
+import { VoxSpellConfigError } from '@voxspell/config/load-config';
 
 import { DaemonRpcConnection } from '../src/rpc/daemon-rpc-connection.js';
 import { SessionCoordinator } from '../src/session-coordinator.js';
@@ -24,6 +39,7 @@ import { FakeRealtimeAsrProvider } from './fakes/fake-realtime-asr.js';
 import { FakeTextPolisher } from './fakes/fake-text-polisher.js';
 
 import type { TextPolisher } from '@voxspell/ai-polisher/text-polisher';
+import type { VoxSpellConfig } from '@voxspell/config/config-schema';
 import type { DaemonReadyParams } from '@voxspell/protocol/daemon';
 import type {
 	SessionCompletedParams,
@@ -35,6 +51,21 @@ import type {
 import type { InMemoryRpcPair } from './fakes/in-memory-rpc.js';
 
 const SESSION_ID = '0190c95b-7f28-7b12-8b6f-a4d3fd239013';
+const validConfig: VoxSpellConfig = {
+	version: 1,
+	asr: {
+		activeProvider: 'openrouter',
+		providers: [
+			{
+				id: 'openrouter',
+				type: 'openai-compatible-transcription',
+				baseUrl: 'https://openrouter.ai/api/v1',
+				apiKeyEnvironment: 'OPENROUTER_API_KEY',
+				model: 'example/asr',
+			},
+		],
+	},
+};
 
 interface ReceivedNotification {
 	readonly method: string;
@@ -48,6 +79,10 @@ interface RpcTestContext {
 	readonly asrProvider: FakeRealtimeAsrProvider;
 	readonly notifications: ReceivedNotification[];
 	readonly reloadConfig: ReturnType<typeof vi.fn<() => Promise<void>>>;
+	readonly validateConfig: ReturnType<typeof vi.fn>;
+	readonly updateConfig: ReturnType<typeof vi.fn>;
+	readonly updateCredentialEntries: ReturnType<typeof vi.fn>;
+	readonly updateFcitxConfig: ReturnType<typeof vi.fn>;
 }
 
 const contexts: RpcTestContext[] = [];
@@ -64,11 +99,37 @@ function createTestContext(options: TestContextOptions = { fragmentSize: 3 }): R
 	const asrProvider = new FakeRealtimeAsrProvider();
 	const notifications: ReceivedNotification[] = [];
 	const reloadConfig = vi.fn(async () => undefined);
+	const validateConfig = vi.fn(async () => undefined);
+	const updateConfig = vi.fn(async () => undefined);
+	const updateCredentialEntries = vi.fn(async () => undefined);
+	const updateFcitxConfig = vi.fn(async () => undefined);
+	const configuration = {
+		getStatus: () => ({
+			state: 'ready' as const,
+			configPath: '/tmp/voxspell/config.yaml',
+			credentialsPath: '/tmp/voxspell/credentials.json',
+			missingCredentialNames: [],
+		}),
+		getConfig: () => undefined,
+		validate: validateConfig,
+		updateConfig,
+		reload: reloadConfig,
+		getStoredCredentialNames: () => [],
+		updateCredentialEntries,
+	};
 	const server = new DaemonRpcConnection({
 		connection: pair.server,
 		serverInfo: { name: 'voxspell-daemon', version: '0.0.0' },
 		capabilities: { partialTranscript: true, polishPreview: false },
-		reloadConfig,
+		configuration,
+		fcitx: {
+			getConfig: async () => ({
+				pttKey: 'space',
+				holdThresholdMs: 200,
+				autoSelectResult: true,
+			}),
+			updateConfig: updateFcitxConfig,
+		},
 		now: () => 123_456,
 		createSessionCoordinator: (publish) =>
 			new SessionCoordinator({
@@ -108,6 +169,10 @@ function createTestContext(options: TestContextOptions = { fragmentSize: 3 }): R
 		asrProvider,
 		notifications,
 		reloadConfig,
+		validateConfig,
+		updateConfig,
+		updateCredentialEntries,
+		updateFcitxConfig,
 	};
 	contexts.push(context);
 	return context;
@@ -210,6 +275,71 @@ describe('DaemonRpcConnection', () => {
 		expect(context.reloadConfig).toHaveBeenCalledOnce();
 		await expect(context.pair.client.sendRequest('unknown.method', {})).rejects.toMatchObject({
 			code: ErrorCodes.MethodNotFound,
+		});
+	});
+
+	it('exposes configuration, credential, status, and Fcitx management methods', async () => {
+		const context = createTestContext();
+		await initialize(context);
+
+		await expect(context.pair.client.sendRequest(ConfigGetRequest, {})).resolves.toBeNull();
+		await expect(
+			context.pair.client.sendRequest(ConfigValidateRequest, { config: validConfig }),
+		).resolves.toBeNull();
+		await expect(
+			context.pair.client.sendRequest(ConfigUpdateRequest, { config: validConfig }),
+		).resolves.toBeNull();
+		await expect(
+			context.pair.client.sendRequest(CredentialsGetStatusRequest, {}),
+		).resolves.toEqual({ storedNames: [] });
+		await expect(
+			context.pair.client.sendRequest(CredentialsUpdateRequest, {
+				set: [{ name: 'OPENROUTER_API_KEY', value: 'secret' }],
+				delete: [],
+			}),
+		).resolves.toBeNull();
+		await expect(context.pair.client.sendRequest(DaemonGetStatusRequest, {})).resolves.toEqual({
+			state: 'ready',
+			configPath: '/tmp/voxspell/config.yaml',
+			credentialsPath: '/tmp/voxspell/credentials.json',
+			missingCredentialNames: [],
+		});
+		await expect(context.pair.client.sendRequest(FcitxGetConfigRequest, {})).resolves.toEqual({
+			pttKey: 'space',
+			holdThresholdMs: 200,
+			autoSelectResult: true,
+		});
+		await expect(
+			context.pair.client.sendRequest(FcitxUpdateConfigRequest, {
+				config: { pttKey: 'Control+space', holdThresholdMs: 300, autoSelectResult: false },
+			}),
+		).resolves.toBeNull();
+
+		expect(context.validateConfig).toHaveBeenCalledWith(validConfig);
+		expect(context.updateConfig).toHaveBeenCalledWith(validConfig);
+		expect(context.updateCredentialEntries).toHaveBeenCalledWith(
+			[{ name: 'OPENROUTER_API_KEY', value: 'secret' }],
+			[],
+		);
+		expect(context.updateFcitxConfig).toHaveBeenCalledOnce();
+	});
+
+	it('rejects ambiguous credential updates and maps config errors without echoing secrets', async () => {
+		const context = createTestContext();
+		await initialize(context);
+
+		await expect(
+			context.pair.client.sendRequest(CredentialsUpdateRequest, {
+				set: [{ name: 'OPENROUTER_API_KEY', value: 'secret-not-to-echo' }],
+				delete: ['OPENROUTER_API_KEY'],
+			}),
+		).rejects.toMatchObject({ code: ErrorCodes.InvalidParams });
+
+		context.reloadConfig.mockRejectedValueOnce(new VoxSpellConfigError('invalid config'));
+		await expect(context.pair.client.sendRequest('config.reload', {})).rejects.toMatchObject({
+			code: DAEMON_ERROR_CODE,
+			message: 'Configuration operation failed',
+			data: { code: 'CONFIG_INVALID', stage: 'config', retryable: false },
 		});
 	});
 

@@ -6,6 +6,8 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DaemonReadyNotification } from '@voxspell/protocol/daemon';
+import { DaemonPingRequest } from '@voxspell/protocol/daemon';
+import { DAEMON_ERROR_CODE } from '@voxspell/protocol/errors';
 import { InitializeRequest } from '@voxspell/protocol/initialize';
 import {
 	SessionCompletedNotification,
@@ -29,6 +31,7 @@ import {
 import { MessageTooLargeError } from '../src/transport/content-length-limit.js';
 
 import type { Socket } from 'node:net';
+import type { RealtimeAsrProvider } from '@voxspell/asr-core/realtime-asr';
 
 interface TestRuntime {
 	readonly directory: string;
@@ -43,6 +46,7 @@ async function createTestRuntime(
 		readonly fakeText?: string;
 		readonly maximumContentLength?: number;
 		readonly onError?: (error: Error) => void;
+		readonly getAsrProvider?: () => RealtimeAsrProvider | undefined;
 	} = {},
 ): Promise<TestRuntime> {
 	const directory = await mkdtemp(path.join(tmpdir(), 'voxspell-runtime-'));
@@ -143,6 +147,47 @@ describe('DaemonRuntime', () => {
 
 		await closed;
 		expect(errors.some((error) => error instanceof MessageTooLargeError)).toBe(true);
+	});
+
+	it('keeps management RPC available to multiple clients without a configured provider', async () => {
+		const { runtime } = await createTestRuntime({ getAsrProvider: () => undefined });
+		const firstSocket = await connect(runtime.socketPath);
+		const secondSocket = await connect(runtime.socketPath);
+		const first = createMessageConnection(
+			new StreamMessageReader(firstSocket),
+			new StreamMessageWriter(firstSocket),
+		);
+		const second = createMessageConnection(
+			new StreamMessageReader(secondSocket),
+			new StreamMessageWriter(secondSocket),
+		);
+		first.listen();
+		second.listen();
+		await Promise.all([
+			first.sendRequest(InitializeRequest, {
+				protocolVersion: 1,
+				clientInfo: { name: 'fcitx-test', version: '0.0.0' },
+			}),
+			second.sendRequest(InitializeRequest, {
+				protocolVersion: 1,
+				clientInfo: { name: 'config-test', version: '0.0.0' },
+			}),
+		]);
+
+		await expect(second.sendRequest(DaemonPingRequest, {})).resolves.toHaveProperty(
+			'timestampMs',
+		);
+		await expect(
+			first.sendRequest(SessionStartRequest, { inputContextId: 'input-context-1' }),
+		).rejects.toMatchObject({
+			code: DAEMON_ERROR_CODE,
+			data: { code: 'NOT_CONFIGURED', stage: 'config' },
+		});
+
+		first.dispose();
+		second.dispose();
+		firstSocket.destroy();
+		secondSocket.destroy();
 	});
 });
 

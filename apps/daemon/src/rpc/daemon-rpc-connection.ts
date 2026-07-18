@@ -2,12 +2,34 @@ import {
 	ConfigReloadParamsSchema,
 	ConfigReloadRequest,
 	ConfigReloadResultSchema,
+	DaemonGetStatusParamsSchema,
+	DaemonGetStatusRequest,
+	DaemonGetStatusResultSchema,
 	DaemonPingParamsSchema,
 	DaemonPingRequest,
 	DaemonPingResultSchema,
 	DaemonReadyNotification,
 	DaemonReadyParamsSchema,
 } from '@voxspell/protocol/daemon';
+import {
+	ConfigGetParamsSchema,
+	ConfigGetRequest,
+	ConfigGetResultSchema,
+	ConfigUpdateParamsSchema,
+	ConfigUpdateRequest,
+	ConfigUpdateResultSchema,
+	ConfigValidateParamsSchema,
+	ConfigValidateRequest,
+	ConfigValidateResultSchema,
+} from '@voxspell/protocol/config';
+import {
+	CredentialsGetStatusParamsSchema,
+	CredentialsGetStatusRequest,
+	CredentialsGetStatusResultSchema,
+	CredentialsUpdateParamsSchema,
+	CredentialsUpdateRequest,
+	CredentialsUpdateResultSchema,
+} from '@voxspell/protocol/credentials';
 import { PROTOCOL_VERSION } from '@voxspell/protocol/common';
 import { DAEMON_ERROR_CODE } from '@voxspell/protocol/errors';
 import {
@@ -41,12 +63,28 @@ import {
 } from '@voxspell/protocol/session';
 import { ProtocolValidationError, validateProtocolValue } from '@voxspell/protocol/validation';
 import { ErrorCodes, ResponseError } from 'vscode-jsonrpc/node';
+import {
+	FcitxGetConfigParamsSchema,
+	FcitxGetConfigRequest,
+	FcitxGetConfigResultSchema,
+	FcitxUpdateConfigParamsSchema,
+	FcitxUpdateConfigRequest,
+	FcitxUpdateConfigResultSchema,
+} from '@voxspell/protocol/fcitx';
 
 import { SessionCoordinatorError } from '../session-coordinator.js';
+import { AsrProviderConfigError } from '@voxspell/config/asr-provider';
+import { VoxSpellCredentialsError } from '@voxspell/config/credentials';
+import { VoxSpellConfigError, VoxSpellConfigNotFoundError } from '@voxspell/config/load-config';
+import { FcitxUnavailableError } from '../fcitx/fcitx-config-client.js';
 
 import type { ServerCapabilities } from '@voxspell/protocol/capabilities';
 import type { ServiceInfo } from '@voxspell/protocol/common';
 import type { ProtocolErrorData } from '@voxspell/protocol/errors';
+import type { VoxSpellConfig } from '@voxspell/config/config-schema';
+import type { CredentialValueUpdate } from '@voxspell/protocol/credentials';
+import type { DaemonGetStatusResult } from '@voxspell/protocol/daemon';
+import type { VoxSpellFcitxConfig } from '@voxspell/protocol/fcitx';
 import type { DaemonSessionEvent, SessionCoordinator } from '../session-coordinator.js';
 import type { MessageConnection } from 'vscode-jsonrpc/node';
 
@@ -57,8 +95,29 @@ export interface DaemonRpcConnectionOptions {
 	readonly createSessionCoordinator: (
 		publish: (event: DaemonSessionEvent) => void,
 	) => SessionCoordinator;
-	readonly reloadConfig: () => Promise<void>;
+	readonly configuration: DaemonConfigurationRpcService;
+	readonly fcitx: FcitxConfigurationRpcService;
 	readonly now?: () => number;
+}
+
+/** 描述 Fcitx 配置 RPC 所需的最小能力。 */
+export interface FcitxConfigurationRpcService {
+	getConfig(): Promise<VoxSpellFcitxConfig>;
+	updateConfig(config: VoxSpellFcitxConfig): Promise<void>;
+}
+
+/** 描述配置 RPC 对 daemon 运行时所需的最小能力。 */
+export interface DaemonConfigurationRpcService {
+	getStatus(): DaemonGetStatusResult;
+	getConfig(): VoxSpellConfig | undefined;
+	validate(config: VoxSpellConfig): Promise<void>;
+	updateConfig(config: VoxSpellConfig): Promise<void>;
+	reload(): Promise<void>;
+	getStoredCredentialNames(): readonly string[];
+	updateCredentialEntries(
+		set: readonly CredentialValueUpdate[],
+		deletedNames: readonly string[],
+	): Promise<void>;
 }
 
 /** 将 TypeBox 入站校验失败转换为不回显原始参数的 JSON-RPC 错误。 */
@@ -99,7 +158,8 @@ export class DaemonRpcConnection {
 	readonly #serverInfo: ServiceInfo;
 	readonly #capabilities: ServerCapabilities;
 	readonly #coordinator: SessionCoordinator;
-	readonly #reloadConfig: () => Promise<void>;
+	readonly #configuration: DaemonConfigurationRpcService;
+	readonly #fcitx: FcitxConfigurationRpcService;
 	readonly #now: () => number;
 	#initialized = false;
 	#closed = false;
@@ -109,7 +169,8 @@ export class DaemonRpcConnection {
 		this.#connection = options.connection;
 		this.#serverInfo = options.serverInfo;
 		this.#capabilities = options.capabilities;
-		this.#reloadConfig = options.reloadConfig;
+		this.#configuration = options.configuration;
+		this.#fcitx = options.fcitx;
 		this.#now = options.now ?? Date.now;
 		this.#coordinator = options.createSessionCoordinator((event) => {
 			this.#enqueueNotification(() => this.#sendSessionEvent(event));
@@ -216,11 +277,115 @@ export class DaemonRpcConnection {
 			this.#ensureInitialized();
 			validateInbound(() => validateProtocolValue(ConfigReloadParamsSchema, rawParams));
 			try {
-				await this.#reloadConfig();
+				await this.#configuration.reload();
 			} catch (error) {
-				throw new ResponseError(ErrorCodes.InternalError, 'Internal error');
+				throw this.#createConfigurationError(error);
 			}
 			return validateOutbound(() => validateProtocolValue(ConfigReloadResultSchema, null));
+		});
+
+		this.#connection.onRequest(ConfigGetRequest, (rawParams) => {
+			this.#ensureInitialized();
+			validateInbound(() => validateProtocolValue(ConfigGetParamsSchema, rawParams));
+			const config = this.#configuration.getConfig() ?? null;
+			return validateOutbound(() => validateProtocolValue(ConfigGetResultSchema, config));
+		});
+
+		this.#connection.onRequest(ConfigValidateRequest, async (rawParams) => {
+			this.#ensureInitialized();
+			const params = validateInbound(() =>
+				validateProtocolValue(ConfigValidateParamsSchema, rawParams),
+			);
+			try {
+				await this.#configuration.validate(params.config);
+			} catch (error) {
+				throw this.#createConfigurationError(error);
+			}
+			return validateOutbound(() => validateProtocolValue(ConfigValidateResultSchema, null));
+		});
+
+		this.#connection.onRequest(ConfigUpdateRequest, async (rawParams) => {
+			this.#ensureInitialized();
+			const params = validateInbound(() =>
+				validateProtocolValue(ConfigUpdateParamsSchema, rawParams),
+			);
+			try {
+				await this.#configuration.updateConfig(params.config);
+			} catch (error) {
+				throw this.#createConfigurationError(error);
+			}
+			return validateOutbound(() => validateProtocolValue(ConfigUpdateResultSchema, null));
+		});
+
+		this.#connection.onRequest(CredentialsGetStatusRequest, (rawParams) => {
+			this.#ensureInitialized();
+			validateInbound(() =>
+				validateProtocolValue(CredentialsGetStatusParamsSchema, rawParams),
+			);
+			return validateOutbound(() =>
+				validateProtocolValue(CredentialsGetStatusResultSchema, {
+					storedNames: this.#configuration.getStoredCredentialNames(),
+				}),
+			);
+		});
+
+		this.#connection.onRequest(CredentialsUpdateRequest, async (rawParams) => {
+			this.#ensureInitialized();
+			const params = validateInbound(() =>
+				validateProtocolValue(CredentialsUpdateParamsSchema, rawParams),
+			);
+			const setNames = new Set(params.set.map((entry) => entry.name));
+			if (
+				setNames.size !== params.set.length ||
+				new Set(params.delete).size !== params.delete.length ||
+				params.delete.some((name) => setNames.has(name))
+			) {
+				throw new ResponseError(ErrorCodes.InvalidParams, 'Invalid params');
+			}
+			try {
+				await this.#configuration.updateCredentialEntries(params.set, params.delete);
+			} catch (error) {
+				throw this.#createConfigurationError(error);
+			}
+			return validateOutbound(() =>
+				validateProtocolValue(CredentialsUpdateResultSchema, null),
+			);
+		});
+
+		this.#connection.onRequest(DaemonGetStatusRequest, (rawParams) => {
+			this.#ensureInitialized();
+			validateInbound(() => validateProtocolValue(DaemonGetStatusParamsSchema, rawParams));
+			return validateOutbound(() =>
+				validateProtocolValue(DaemonGetStatusResultSchema, this.#configuration.getStatus()),
+			);
+		});
+
+		this.#connection.onRequest(FcitxGetConfigRequest, async (rawParams) => {
+			this.#ensureInitialized();
+			validateInbound(() => validateProtocolValue(FcitxGetConfigParamsSchema, rawParams));
+			try {
+				const config = await this.#fcitx.getConfig();
+				return validateOutbound(() =>
+					validateProtocolValue(FcitxGetConfigResultSchema, config),
+				);
+			} catch (error) {
+				throw this.#createFcitxError(error);
+			}
+		});
+
+		this.#connection.onRequest(FcitxUpdateConfigRequest, async (rawParams) => {
+			this.#ensureInitialized();
+			const params = validateInbound(() =>
+				validateProtocolValue(FcitxUpdateConfigParamsSchema, rawParams),
+			);
+			try {
+				await this.#fcitx.updateConfig(params.config);
+			} catch (error) {
+				throw this.#createFcitxError(error);
+			}
+			return validateOutbound(() =>
+				validateProtocolValue(FcitxUpdateConfigResultSchema, null),
+			);
 		});
 
 		this.#connection.onRequest(DaemonPingRequest, (rawParams) => {
@@ -236,6 +401,37 @@ export class DaemonRpcConnection {
 		if (!this.#initialized) {
 			throw new ResponseError(ErrorCodes.ServerNotInitialized, 'Server is not initialized');
 		}
+	}
+
+	#createConfigurationError(error: unknown): ResponseError<ProtocolErrorData> {
+		let code: ProtocolErrorData['code'] = 'CONFIG_APPLY_FAILED';
+		let stage: ProtocolErrorData['stage'] = 'config';
+		if (error instanceof VoxSpellConfigNotFoundError) {
+			code = 'CONFIG_NOT_FOUND';
+		} else if (error instanceof VoxSpellConfigError) {
+			code = 'CONFIG_INVALID';
+		} else if (error instanceof VoxSpellCredentialsError) {
+			code = 'CREDENTIAL_STORE_INVALID';
+			stage = 'credential';
+		} else if (error instanceof AsrProviderConfigError) {
+			code = 'CREDENTIAL_MISSING';
+			stage = 'credential';
+		}
+		return new ResponseError(DAEMON_ERROR_CODE, 'Configuration operation failed', {
+			code,
+			stage,
+			retryable: false,
+		});
+	}
+
+	#createFcitxError(error: unknown): ResponseError<ProtocolErrorData> {
+		const code =
+			error instanceof FcitxUnavailableError ? 'FCITX_UNAVAILABLE' : 'FCITX_CONFIG_FAILED';
+		return new ResponseError(DAEMON_ERROR_CODE, 'Fcitx configuration operation failed', {
+			code,
+			stage: 'fcitx',
+			retryable: error instanceof FcitxUnavailableError,
+		});
 	}
 
 	async #runSessionOperation<T>(operation: () => Promise<T>): Promise<T> {

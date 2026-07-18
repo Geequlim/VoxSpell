@@ -26,6 +26,7 @@ import type {
 import type { TextPipeline } from '@voxspell/text-pipeline/text-pipeline';
 import type { AudioCaptureBackend, AudioCaptureSession } from './audio-capture.js';
 import type { SessionState } from './session-state.js';
+import type { DaemonSessionGate } from './session-gate.js';
 
 export type DaemonSessionEvent =
 	| { readonly method: 'session.phase'; readonly params: SessionPhaseParams }
@@ -36,11 +37,13 @@ export type DaemonSessionEvent =
 
 export interface SessionCoordinatorOptions {
 	readonly captureBackend: AudioCaptureBackend;
-	readonly asrProvider: RealtimeAsrProvider;
+	readonly asrProvider?: RealtimeAsrProvider;
+	readonly getAsrProvider?: () => RealtimeAsrProvider | undefined;
 	readonly textPipeline?: TextPipeline;
 	readonly textPolisher?: TextPolisher;
 	readonly publish?: (event: DaemonSessionEvent) => void;
 	readonly createSessionId?: () => SessionId;
+	readonly sessionGate?: DaemonSessionGate;
 }
 
 interface ActiveSession {
@@ -75,22 +78,25 @@ export class SessionCoordinatorError extends Error {
 /** 管理 daemon 中唯一的录音、识别、处理、润色与结果选择会话。 */
 export class SessionCoordinator {
 	readonly #captureBackend: AudioCaptureBackend;
-	readonly #asrProvider: RealtimeAsrProvider;
+	readonly #getAsrProvider: () => RealtimeAsrProvider | undefined;
 	readonly #textPipeline: TextPipeline;
 	readonly #textPolisher?: TextPolisher;
 	readonly #publish: (event: DaemonSessionEvent) => void;
 	readonly #createSessionId: () => SessionId;
+	readonly #sessionGate?: DaemonSessionGate;
+	readonly #sessionOwner = {};
 	#state: SessionState = 'idle';
 	#active?: ActiveSession;
 	#lastSettledSessionId?: SessionId;
 
 	constructor(options: SessionCoordinatorOptions) {
 		this.#captureBackend = options.captureBackend;
-		this.#asrProvider = options.asrProvider;
+		this.#getAsrProvider = options.getAsrProvider ?? (() => options.asrProvider);
 		this.#textPipeline = options.textPipeline ?? new PassThroughTextPipeline();
 		this.#textPolisher = options.textPolisher;
 		this.#publish = options.publish ?? (() => undefined);
 		this.#createSessionId = options.createSessionId ?? randomUUID;
+		this.#sessionGate = options.sessionGate;
 	}
 
 	get state(): SessionState {
@@ -110,6 +116,17 @@ export class SessionCoordinator {
 				'session',
 			);
 		}
+		const asrProvider = this.#getAsrProvider();
+		if (!asrProvider) {
+			throw this.#createError('VoxSpell is not configured', 'NOT_CONFIGURED', 'config');
+		}
+		if (this.#sessionGate && !this.#sessionGate.acquire(this.#sessionOwner)) {
+			throw this.#createError(
+				'A recording session is already active',
+				'SESSION_BUSY',
+				'session',
+			);
+		}
 
 		this.#state = transitionSessionState(this.#state, 'starting');
 		const active: ActiveSession = {
@@ -122,7 +139,7 @@ export class SessionCoordinator {
 		this.#announcePhase(active, 'preparing');
 
 		try {
-			active.asr = await this.#asrProvider.createSession({ sessionId: active.id });
+			active.asr = await asrProvider.createSession({ sessionId: active.id });
 			await active.asr.start(active.abortController.signal);
 			active.eventPump = this.#consumeAsrEvents(active);
 		} catch (error) {
@@ -510,6 +527,7 @@ export class SessionCoordinator {
 		this.#lastSettledSessionId = active.id;
 		this.#active = undefined;
 		this.#state = transitionSessionState(this.#state, 'idle');
+		this.#sessionGate?.release(this.#sessionOwner);
 	}
 
 	#transition(active: ActiveSession, state: SessionState): void {

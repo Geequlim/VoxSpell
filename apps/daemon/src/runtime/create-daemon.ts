@@ -9,7 +9,9 @@ import {
 import { DeterministicAudioCaptureBackend } from '../dev/deterministic-audio-capture.js';
 import { DeterministicAsrProvider } from '../dev/deterministic-asr.js';
 import { DaemonRpcConnection } from '../rpc/daemon-rpc-connection.js';
+import { FcitxUnavailableError } from '../fcitx/fcitx-config-client.js';
 import { SessionCoordinator } from '../session-coordinator.js';
+import { DaemonSessionGate } from '../session-gate.js';
 import {
 	ContentLengthLimitTransform,
 	DEFAULT_MAX_CONTENT_LENGTH,
@@ -22,12 +24,18 @@ import type { RealtimeAsrProvider } from '@voxspell/asr-core/realtime-asr';
 import type { TextPipeline } from '@voxspell/text-pipeline/text-pipeline';
 import type { AudioCaptureBackend } from '../audio-capture.js';
 import type { UnixSocketClient } from '../transport/unix-socket-server.js';
+import type { DaemonConfigurationRpcService } from '../rpc/daemon-rpc-connection.js';
+import type { FcitxConfigurationRpcService } from '../rpc/daemon-rpc-connection.js';
 
 export interface DaemonRuntimeOptions {
 	readonly socketPath: string;
 	readonly fakeText?: string;
 	readonly captureBackend?: AudioCaptureBackend;
 	readonly asrProvider?: RealtimeAsrProvider;
+	readonly getAsrProvider?: () => RealtimeAsrProvider | undefined;
+	readonly reloadConfig?: () => Promise<void>;
+	readonly configuration?: DaemonConfigurationRpcService;
+	readonly fcitx?: FcitxConfigurationRpcService;
 	readonly textPipeline?: TextPipeline;
 	readonly textPolisher?: TextPolisher;
 	readonly maximumContentLength?: number;
@@ -54,10 +62,17 @@ export function resolveDaemonSocketPath(environment: NodeJS.ProcessEnv = process
 /** 组合 Unix Socket、JSON-RPC 和音频、ASR 后端的可执行 daemon。 */
 export class DaemonRuntime {
 	readonly #server: UnixSocketServer;
+	readonly #sessionGate = new DaemonSessionGate();
 
 	constructor(options: DaemonRuntimeOptions) {
 		const captureBackend = options.captureBackend ?? new DeterministicAudioCaptureBackend();
-		const asrProvider = options.asrProvider ?? new DeterministicAsrProvider(options.fakeText);
+		const fallbackAsrProvider =
+			options.asrProvider ?? new DeterministicAsrProvider(options.fakeText);
+		const getAsrProvider = options.getAsrProvider ?? (() => fallbackAsrProvider);
+		const reloadConfig = options.reloadConfig ?? (async () => undefined);
+		const configuration =
+			options.configuration ?? this.#createFallbackConfiguration(reloadConfig);
+		const fcitx = options.fcitx ?? this.#createFallbackFcitxConfiguration();
 		const textPipeline = options.textPipeline;
 		const textPolisher = options.textPolisher;
 		const maximumContentLength = options.maximumContentLength ?? DEFAULT_MAX_CONTENT_LENGTH;
@@ -70,10 +85,13 @@ export class DaemonRuntime {
 				this.#createClient(
 					socket,
 					captureBackend,
-					asrProvider,
+					getAsrProvider,
 					textPipeline,
 					textPolisher,
+					this.#sessionGate,
 					maximumContentLength,
+					configuration,
+					fcitx,
 					onError,
 				),
 		});
@@ -96,10 +114,13 @@ export class DaemonRuntime {
 	#createClient(
 		socket: Socket,
 		captureBackend: AudioCaptureBackend,
-		asrProvider: RealtimeAsrProvider,
+		getAsrProvider: () => RealtimeAsrProvider | undefined,
 		textPipeline: TextPipeline | undefined,
 		textPolisher: TextPolisher | undefined,
+		sessionGate: DaemonSessionGate,
 		maximumContentLength: number,
+		configuration: DaemonConfigurationRpcService,
+		fcitx: FcitxConfigurationRpcService,
 		onError: (error: Error) => void,
 	): UnixSocketClient {
 		const limiter = new ContentLengthLimitTransform(maximumContentLength);
@@ -112,16 +133,18 @@ export class DaemonRuntime {
 			connection,
 			serverInfo: { name: 'voxspell-daemon', version: '0.0.0' },
 			capabilities: {
-				partialTranscript: asrProvider.capabilities.partialResults,
+				partialTranscript: getAsrProvider()?.capabilities.partialResults ?? false,
 				polishPreview: textPolisher !== undefined,
 			},
-			reloadConfig: async () => undefined,
+			configuration,
+			fcitx,
 			createSessionCoordinator: (publish) =>
 				new SessionCoordinator({
 					captureBackend,
-					asrProvider,
+					getAsrProvider,
 					textPipeline,
 					textPolisher,
+					sessionGate,
 					publish,
 				}),
 		});
@@ -140,6 +163,34 @@ export class DaemonRuntime {
 				socket.unpipe(limiter);
 				limiter.destroy();
 				await rpcConnection.dispose();
+			},
+		};
+	}
+
+	#createFallbackConfiguration(reload: () => Promise<void>): DaemonConfigurationRpcService {
+		return {
+			getStatus: () => ({
+				state: 'ready',
+				configPath: '/dev/null',
+				credentialsPath: '/dev/null',
+				missingCredentialNames: [],
+			}),
+			getConfig: () => undefined,
+			validate: async () => undefined,
+			updateConfig: async () => undefined,
+			reload,
+			getStoredCredentialNames: () => [],
+			updateCredentialEntries: async () => undefined,
+		};
+	}
+
+	#createFallbackFcitxConfiguration(): FcitxConfigurationRpcService {
+		return {
+			getConfig: async () => {
+				throw new FcitxUnavailableError();
+			},
+			updateConfig: async () => {
+				throw new FcitxUnavailableError();
 			},
 		};
 	}

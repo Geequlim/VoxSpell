@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { SessionCoordinator, SessionCoordinatorError } from '../src/session-coordinator.js';
+import { DaemonSessionGate } from '../src/session-gate.js';
 import { FakeAudioCaptureBackend } from './fakes/fake-audio-capture.js';
 import { FakeRealtimeAsrProvider } from './fakes/fake-realtime-asr.js';
 import { FakeTextPolisher } from './fakes/fake-text-polisher.js';
@@ -23,6 +24,7 @@ interface TestContextOptions {
 	readonly sessionIds?: string[];
 	readonly textPipeline?: TextPipeline;
 	readonly textPolisher?: TextPolisher;
+	readonly sessionGate?: DaemonSessionGate;
 }
 
 /** 创建使用确定性 ID 和测试 fake 的协调器。 */
@@ -36,6 +38,7 @@ function createTestContext(options: TestContextOptions = {}): TestContext {
 		asrProvider,
 		textPipeline: options.textPipeline,
 		textPolisher: options.textPolisher,
+		sessionGate: options.sessionGate,
 		publish: (event) => events.push(event),
 		createSessionId: () => {
 			const sessionId = sessionIds.shift();
@@ -67,6 +70,23 @@ describe('SessionCoordinator', () => {
 			params: { sessionId: SESSION_ID, phase: 'recording' },
 		});
 		await context.coordinator.cancel(SESSION_ID, 'user');
+	});
+
+	it('enforces one active session across multiple coordinators', async () => {
+		const sessionGate = new DaemonSessionGate();
+		const first = createTestContext({ sessionGate });
+		const second = createTestContext({ sessionGate });
+		await first.coordinator.start('input-context-1');
+
+		await expect(second.coordinator.start('input-context-2')).rejects.toMatchObject({
+			data: { code: 'SESSION_BUSY', stage: 'session' },
+		});
+
+		await first.coordinator.cancel(SESSION_ID, 'user');
+		await expect(second.coordinator.start('input-context-2')).resolves.toEqual({
+			sessionId: SESSION_ID,
+		});
+		await second.coordinator.cancel(SESSION_ID, 'user');
 	});
 
 	it('publishes corrected preview snapshots and completes without AI polish', async () => {

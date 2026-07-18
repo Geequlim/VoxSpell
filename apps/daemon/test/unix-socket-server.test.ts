@@ -39,7 +39,7 @@ afterEach(async () => {
 });
 
 describe('UnixSocketServer', () => {
-	it('creates secure paths, allows one client, and cleans up on stop', async () => {
+	it('creates secure paths, allows multiple clients, and cleans up on stop', async () => {
 		const socketPath = await createSocketPath();
 		const clients: UnixSocketClient[] = [];
 		const dispose = vi.fn(async () => undefined);
@@ -60,12 +60,13 @@ describe('UnixSocketServer', () => {
 
 		const firstClient = await connect(socketPath);
 		const secondClient = await connect(socketPath);
-		await vi.waitFor(() => expect(secondClient.destroyed).toBe(true));
-		expect(clients).toHaveLength(1);
+		await vi.waitFor(() => expect(clients).toHaveLength(2));
+		expect(secondClient.destroyed).toBe(false);
 
 		firstClient.destroy();
 		await vi.waitFor(() => expect(dispose).toHaveBeenCalledOnce());
 		await server.stop();
+		expect(dispose).toHaveBeenCalledTimes(2);
 		await expect(lstat(socketPath)).rejects.toMatchObject({ code: 'ENOENT' });
 	});
 

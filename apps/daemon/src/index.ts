@@ -1,16 +1,30 @@
-import { createConfiguredAsrProvider } from './asr/create-configured-asr-provider.js';
+import { homedir } from 'node:os';
+
+import { resolveVoxSpellConfigPaths } from '@voxspell/config/config-paths';
+
 import { PwRecordAudioCaptureBackend } from './audio/pw-record-audio-capture.js';
+import { DaemonConfigManager } from './configuration/daemon-config-manager.js';
+import { DeterministicAsrProvider } from './dev/deterministic-asr.js';
+import { FcitxConfigClient, NativeFcitxControllerTransport } from './fcitx/fcitx-config-client.js';
 import { DaemonRuntime, resolveDaemonSocketPath } from './runtime/create-daemon.js';
 
 /** 启动 daemon，并在进程信号到达时完成清理。 */
 async function main(): Promise<void> {
-	const asrProvider = process.env.VOXSPELL_CONFIG_PATH
-		? await createConfiguredAsrProvider(process.env.VOXSPELL_CONFIG_PATH)
-		: undefined;
+	const configManager = new DaemonConfigManager({
+		paths: resolveVoxSpellConfigPaths(process.env, homedir()),
+	});
+	await configManager.initialize();
+	const deterministicProvider = new DeterministicAsrProvider();
+	const getAsrProvider = (): ReturnType<DaemonConfigManager['getAsrProvider']> => {
+		if (process.env.VOXSPELL_DETERMINISTIC === '1') return deterministicProvider;
+		return configManager.getAsrProvider();
+	};
 	const runtime = new DaemonRuntime({
 		socketPath: resolveDaemonSocketPath(),
 		captureBackend: new PwRecordAudioCaptureBackend(),
-		asrProvider,
+		getAsrProvider,
+		configuration: configManager,
+		fcitx: new FcitxConfigClient(new NativeFcitxControllerTransport()),
 		onError: (error) => console.error(`[voxspell] ${error.name}: ${error.message}`),
 	});
 	let stopping = false;
@@ -33,7 +47,7 @@ async function main(): Promise<void> {
 	process.once('SIGTERM', () => void shutdown('SIGTERM'));
 	await runtime.start();
 	console.log(
-		`[voxspell] daemon listening on ${runtime.socketPath} (capture=pw-record, provider=${asrProvider?.id ?? 'deterministic'})`,
+		`[voxspell] daemon listening on ${runtime.socketPath} (capture=pw-record, state=${configManager.getStatus().state})`,
 	);
 }
 

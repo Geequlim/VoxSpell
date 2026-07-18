@@ -78,7 +78,7 @@ export class UnixSocketServer {
 	readonly #createClient: (socket: Socket) => UnixSocketClient;
 	readonly #onError: (error: Error) => void;
 	#server?: Server;
-	#activeClient?: ActiveClient;
+	readonly #activeClients = new Set<ActiveClient>();
 	#socketIdentity?: SocketIdentity;
 	#stopOperation?: Promise<void>;
 
@@ -150,19 +150,14 @@ export class UnixSocketServer {
 	}
 
 	#accept(socket: Socket): void {
-		if (this.#activeClient && !this.#activeClient.socket.destroyed) {
-			socket.destroy();
-			return;
-		}
-
 		try {
 			const activeClient: ActiveClient = {
 				socket,
 				client: this.#createClient(socket),
 			};
-			this.#activeClient = activeClient;
+			this.#activeClients.add(activeClient);
 			socket.once('close', () => {
-				if (this.#activeClient === activeClient) this.#activeClient = undefined;
+				this.#activeClients.delete(activeClient);
 				void this.#disposeClient(activeClient);
 			});
 		} catch (error) {
@@ -177,12 +172,10 @@ export class UnixSocketServer {
 	}
 
 	async #stop(): Promise<void> {
-		const activeClient = this.#activeClient;
-		this.#activeClient = undefined;
-		if (activeClient) {
-			activeClient.socket.destroy();
-			await this.#disposeClient(activeClient);
-		}
+		const activeClients = [...this.#activeClients];
+		this.#activeClients.clear();
+		for (const activeClient of activeClients) activeClient.socket.destroy();
+		await Promise.all(activeClients.map((activeClient) => this.#disposeClient(activeClient)));
 
 		const server = this.#server;
 		this.#server = undefined;
