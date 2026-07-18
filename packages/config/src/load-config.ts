@@ -23,6 +23,14 @@ export class VoxSpellConfigError extends Error {
 	}
 }
 
+/** 表示默认主配置尚未创建。 */
+export class VoxSpellConfigNotFoundError extends VoxSpellConfigError {
+	constructor(filePath: string) {
+		super(`VoxSpell config does not exist: ${filePath}`);
+		this.name = 'VoxSpellConfigNotFoundError';
+	}
+}
+
 /** 解析未知配置值并完成跨字段约束校验。 */
 export function parseVoxSpellConfig(value: unknown): VoxSpellConfig {
 	const issues = [...Value.Errors(VoxSpellConfigSchema, value)].map((issue) => ({
@@ -53,6 +61,9 @@ export async function loadVoxSpellConfig(filePath: string): Promise<VoxSpellConf
 	try {
 		source = await readFile(filePath, 'utf8');
 	} catch (error) {
+		if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+			throw new VoxSpellConfigNotFoundError(filePath);
+		}
 		throw new VoxSpellConfigError(`Unable to read VoxSpell config: ${filePath}`);
 	}
 

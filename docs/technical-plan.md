@@ -458,6 +458,7 @@ VoxSpell/
 
 ```text
 $XDG_CONFIG_HOME/voxspell/config.yaml
+$XDG_CONFIG_HOME/voxspell/credentials.json
 $XDG_CONFIG_HOME/voxspell/dictionary.yaml
 $XDG_STATE_HOME/voxspell/logs/
 $XDG_RUNTIME_DIR/voxspell/daemon.sock
@@ -466,8 +467,8 @@ $XDG_RUNTIME_DIR/voxspell/daemon.sock
 原则：
 
 - 普通设置可由 YAML 管理，并使用 TypeBox schema 校验和推导 TypeScript 类型。
-- 密钥优先从环境变量、systemd credentials 或 Secret Service 获取。
-- 明文密钥文件必须是 `0600`，并从 Git 排除。
+- 密钥由 daemon 的 `0600` 应用私有凭据文件管理，键名沿用主配置引用的环境变量名称。
+- daemon 解析时允许真实进程环境覆盖同名凭据，供开发、测试和高级用户自行配置，但不提供 systemd 环境配置界面。
 - 配置日志只能打印密钥来源和是否存在，不能打印密钥值。
 - 配置热加载失败时继续使用上一份有效配置。
 

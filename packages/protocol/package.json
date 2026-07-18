@@ -7,14 +7,18 @@
 	"exports": {
 		"./capabilities": "./src/capabilities.ts",
 		"./common": "./src/common.ts",
+		"./config": "./src/config.ts",
+		"./credentials": "./src/credentials.ts",
 		"./daemon": "./src/daemon.ts",
 		"./errors": "./src/errors.ts",
+		"./fcitx": "./src/fcitx.ts",
 		"./initialize": "./src/initialize.ts",
 		"./session": "./src/session.ts",
 		"./validation": "./src/validation.ts"
 	},
 	"dependencies": {
 		"@sinclair/typebox": "0.34.52",
+		"@voxspell/config": "workspace:^",
 		"vscode-jsonrpc": "9.0.1"
 	},
 	"devDependencies": {

@@ -9,6 +9,11 @@
 		"apps/*",
 		"packages/*"
 	],
+	"dependenciesMeta": {
+		"node-gtk@4.1.1": {
+			"built": true
+		}
+	},
 	"devDependencies": {
 		"@tinyaxis/tiny-docs": "^1.1.1",
 		"@tinyaxis/toolkit": "0.3.0",

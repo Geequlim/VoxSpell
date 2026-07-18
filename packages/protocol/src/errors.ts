@@ -14,6 +14,14 @@ export const ProtocolErrorCodeSchema = Type.Union([
 	Type.Literal('ASR_FAILED'),
 	Type.Literal('PROCESSING_FAILED'),
 	Type.Literal('POLISH_FAILED'),
+	Type.Literal('NOT_CONFIGURED'),
+	Type.Literal('CONFIG_NOT_FOUND'),
+	Type.Literal('CONFIG_INVALID'),
+	Type.Literal('CONFIG_APPLY_FAILED'),
+	Type.Literal('CREDENTIAL_MISSING'),
+	Type.Literal('CREDENTIAL_STORE_INVALID'),
+	Type.Literal('FCITX_UNAVAILABLE'),
+	Type.Literal('FCITX_CONFIG_FAILED'),
 ]);
 export type ProtocolErrorCode = Static<typeof ProtocolErrorCodeSchema>;
 
@@ -24,6 +32,9 @@ export const ErrorStageSchema = Type.Union([
 	Type.Literal('asr'),
 	Type.Literal('processing'),
 	Type.Literal('polish'),
+	Type.Literal('config'),
+	Type.Literal('credential'),
+	Type.Literal('fcitx'),
 ]);
 export type ErrorStage = Static<typeof ErrorStageSchema>;
 

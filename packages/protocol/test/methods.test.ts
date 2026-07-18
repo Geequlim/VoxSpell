@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { ConfigReloadRequest, DaemonPingRequest, DaemonReadyNotification } from '../src/daemon.js';
+import {
+	ConfigReloadRequest,
+	DaemonGetStatusRequest,
+	DaemonPingRequest,
+	DaemonReadyNotification,
+} from '../src/daemon.js';
+import { ConfigGetRequest, ConfigUpdateRequest, ConfigValidateRequest } from '../src/config.js';
+import { CredentialsGetStatusRequest, CredentialsUpdateRequest } from '../src/credentials.js';
+import { FcitxGetConfigRequest, FcitxUpdateConfigRequest } from '../src/fcitx.js';
 import { InitializeRequest } from '../src/initialize.js';
 import {
 	SessionCancelRequest,
@@ -22,6 +30,14 @@ describe('JSON-RPC method descriptors', () => {
 		[SessionCancelRequest, 'session.cancel'],
 		[SessionSelectResultRequest, 'session.selectResult'],
 		[ConfigReloadRequest, 'config.reload'],
+		[ConfigGetRequest, 'config.get'],
+		[ConfigValidateRequest, 'config.validate'],
+		[ConfigUpdateRequest, 'config.update'],
+		[CredentialsGetStatusRequest, 'credentials.getStatus'],
+		[CredentialsUpdateRequest, 'credentials.update'],
+		[FcitxGetConfigRequest, 'fcitx.getConfig'],
+		[FcitxUpdateConfigRequest, 'fcitx.updateConfig'],
+		[DaemonGetStatusRequest, 'daemon.getStatus'],
 		[DaemonPingRequest, 'daemon.ping'],
 	])('defines request %s', (descriptor, method) => {
 		expect(descriptor.method).toBe(method);

@@ -78,6 +78,23 @@ export function resolveAsrProvider(
 	};
 }
 
+/** 返回选定 Provider 解析时需要的全部凭据名称。 */
+export function getAsrProviderCredentialNames(
+	config: VoxSpellConfig,
+	providerId = config.asr.activeProvider,
+): readonly string[] {
+	const provider = config.asr.providers.find((candidate) => candidate.id === providerId);
+	if (!provider) throw new AsrProviderConfigError(`ASR provider does not exist: ${providerId}`);
+	if (provider.type === 'tencent-realtime') {
+		return [
+			TENCENT_APP_ID_ENVIRONMENT,
+			TENCENT_SECRET_ID_ENVIRONMENT,
+			TENCENT_SECRET_KEY_ENVIRONMENT,
+		];
+	}
+	return [provider.apiKeyEnvironment];
+}
+
 /** 读取 Provider 必需的环境变量，但不把密钥值写入错误。 */
 function getRequiredEnvironment(
 	environment: NodeJS.ProcessEnv,

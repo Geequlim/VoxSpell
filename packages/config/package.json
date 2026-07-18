@@ -6,8 +6,11 @@
 	"sideEffects": false,
 	"exports": {
 		"./asr-provider": "./src/asr-provider.ts",
+		"./config-paths": "./src/config-paths.ts",
 		"./config-schema": "./src/config-schema.ts",
-		"./load-config": "./src/load-config.ts"
+		"./credentials": "./src/credentials.ts",
+		"./load-config": "./src/load-config.ts",
+		"./save-config": "./src/save-config.ts"
 	},
 	"dependencies": {
 		"@sinclair/typebox": "0.34.52",

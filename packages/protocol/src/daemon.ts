@@ -37,3 +37,27 @@ export type DaemonPingResult = Static<typeof DaemonPingResultSchema>;
 export const DaemonPingRequest = new RequestType<EmptyParams, DaemonPingResult, ProtocolErrorData>(
 	'daemon.ping',
 );
+
+export const DaemonConfigurationStateSchema = Type.Union([
+	Type.Literal('needs-configuration'),
+	Type.Literal('ready'),
+	Type.Literal('degraded'),
+]);
+export const DaemonGetStatusParamsSchema = EmptyParamsSchema;
+export const DaemonGetStatusResultSchema = Type.Object(
+	{
+		state: DaemonConfigurationStateSchema,
+		configPath: Type.String({ minLength: 1 }),
+		credentialsPath: Type.String({ minLength: 1 }),
+		activeProvider: Type.Optional(Type.String({ minLength: 1 })),
+		missingCredentialNames: Type.Array(Type.String({ pattern: '^[A-Z][A-Z0-9_]*$' })),
+		lastError: Type.Optional(Type.String({ minLength: 1 })),
+	},
+	{ additionalProperties: false },
+);
+export type DaemonGetStatusResult = Static<typeof DaemonGetStatusResultSchema>;
+export const DaemonGetStatusRequest = new RequestType<
+	EmptyParams,
+	DaemonGetStatusResult,
+	ProtocolErrorData
+>('daemon.getStatus');
