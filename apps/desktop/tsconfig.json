@@ -1,0 +1,10 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"rootDir": ".",
+		"paths": {
+			"node-gtk": ["./.cache/types/node-gtk.d.ts"]
+		}
+	},
+	"include": ["src", ".cache/types"]
+}
