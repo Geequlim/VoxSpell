@@ -2,44 +2,56 @@ import { Adw, Gtk } from '../gtk';
 import { getProviderDisplayName } from '../provider-display';
 import { gtk } from '../state/gtk';
 
+import type { DesktopState } from '../desktop-state';
 import type { DaemonState } from '../state/daemon-state';
 
-const bind = gtk<DaemonState, DiagnosticsPageView>();
+const bind = gtk<DesktopState, DiagnosticsPageView>();
 
 @bind.view
 class DiagnosticsPageView {
-	declare state?: DaemonState;
+	declare state?: DesktopState;
 
 	@bind.disposeOnDestroy readonly root: InstanceType<typeof Adw.PreferencesPage>;
-	@bind.prop('iconName', (state) => state.statusIconName)
+	@bind.prop('iconName', (state) => state.daemon.statusIconName)
 	readonly statusIcon: InstanceType<typeof Gtk.Image>;
-	@bind.prop('title', (state) => state.statusTitle)
-	@bind.prop('subtitle', (state) => state.statusDescription)
+	@bind.prop('title', (state) => state.daemon.statusTitle)
+	@bind.prop('subtitle', (state) => state.daemon.statusDescription)
 	readonly connectionRow: InstanceType<typeof Adw.ActionRow>;
-	@bind.prop('subtitle', (state) => getServerDescription(state))
+	@bind.prop('subtitle', (state) => getServerDescription(state.daemon))
 	readonly serverRow: InstanceType<typeof Adw.ActionRow>;
-	@bind.prop('subtitle', (state) => getProtocolDescription(state))
+	@bind.prop('subtitle', (state) => getProtocolDescription(state.daemon))
 	readonly protocolRow: InstanceType<typeof Adw.ActionRow>;
-	@bind.prop('subtitle', (state) => getCapabilityDescription(state))
+	@bind.prop('subtitle', (state) => getCapabilityDescription(state.daemon))
 	readonly capabilityRow: InstanceType<typeof Adw.ActionRow>;
-	@bind.prop('subtitle', (state) => getConfigurationDescription(state))
+	@bind.prop('subtitle', (state) => getFcitxServiceDescription(state))
+	readonly fcitxServiceRow: InstanceType<typeof Adw.ActionRow>;
+	@bind.prop('subtitle', (state) => getVoxSpellAddonDescription(state))
+	readonly voxspellAddonRow: InstanceType<typeof Adw.ActionRow>;
+	@bind.prop('subtitle', (state) => getRimeDescription(state))
+	readonly rimeRow: InstanceType<typeof Adw.ActionRow>;
+	@bind.prop('subtitle', (state) => getCurrentInputMethodDescription(state))
+	readonly currentInputMethodRow: InstanceType<typeof Adw.ActionRow>;
+	@bind.prop('subtitle', (state) => getConfigurationDescription(state.daemon))
 	readonly configurationRow: InstanceType<typeof Adw.ActionRow>;
-	@bind.prop('subtitle', (state) => getActiveProviderDescription(state))
+	@bind.prop('subtitle', (state) => getActiveProviderDescription(state.daemon))
 	readonly providerRow: InstanceType<typeof Adw.ActionRow>;
-	@bind.prop('subtitle', (state) => getMissingCredentialDescription(state))
+	@bind.prop('subtitle', (state) => getMissingCredentialDescription(state.daemon))
 	readonly credentialRow: InstanceType<typeof Adw.ActionRow>;
-	@bind.prop('subtitle', (state) => state.status?.configPath ?? '—')
+	@bind.prop('subtitle', (state) => state.daemon.status?.configPath ?? '—')
 	readonly configPathRow: InstanceType<typeof Adw.ActionRow>;
-	@bind.prop('subtitle', (state) => state.status?.credentialsPath ?? '—')
+	@bind.prop('subtitle', (state) => state.daemon.status?.credentialsPath ?? '—')
 	readonly credentialsPathRow: InstanceType<typeof Adw.ActionRow>;
-	@bind.prop('subtitle', (state) => state.status?.lastError ?? state.lastError ?? '')
-	@bind.visible((state) => Boolean(state.status?.lastError ?? state.lastError))
+	@bind.prop(
+		'subtitle',
+		(state) => state.daemon.status?.lastError ?? state.daemon.lastError ?? '',
+	)
+	@bind.visible((state) => Boolean(state.daemon.status?.lastError ?? state.daemon.lastError))
 	readonly errorRow: InstanceType<typeof Adw.ActionRow>;
-	@bind.sensitive((state) => state.connectionPhase === 'connected')
-	@bind.click((state) => void state.refresh())
+	@bind.sensitive((state) => state.inputMethodDiagnostics.phase !== 'loading')
+	@bind.click((state) => void state.refreshDiagnostics())
 	readonly refreshButton: InstanceType<typeof Gtk.Button>;
-	@bind.visible((state) => state.retryVisible)
-	@bind.click((state) => state.retry())
+	@bind.visible((state) => state.daemon.retryVisible)
+	@bind.click((state) => state.daemon.retry())
 	readonly retryButton: InstanceType<typeof Gtk.Button>;
 
 	constructor(
@@ -49,6 +61,10 @@ class DiagnosticsPageView {
 		serverRow: InstanceType<typeof Adw.ActionRow>,
 		protocolRow: InstanceType<typeof Adw.ActionRow>,
 		capabilityRow: InstanceType<typeof Adw.ActionRow>,
+		fcitxServiceRow: InstanceType<typeof Adw.ActionRow>,
+		voxspellAddonRow: InstanceType<typeof Adw.ActionRow>,
+		rimeRow: InstanceType<typeof Adw.ActionRow>,
+		currentInputMethodRow: InstanceType<typeof Adw.ActionRow>,
 		configurationRow: InstanceType<typeof Adw.ActionRow>,
 		providerRow: InstanceType<typeof Adw.ActionRow>,
 		credentialRow: InstanceType<typeof Adw.ActionRow>,
@@ -64,6 +80,10 @@ class DiagnosticsPageView {
 		this.serverRow = serverRow;
 		this.protocolRow = protocolRow;
 		this.capabilityRow = capabilityRow;
+		this.fcitxServiceRow = fcitxServiceRow;
+		this.voxspellAddonRow = voxspellAddonRow;
+		this.rimeRow = rimeRow;
+		this.currentInputMethodRow = currentInputMethodRow;
 		this.configurationRow = configurationRow;
 		this.providerRow = providerRow;
 		this.credentialRow = credentialRow;
@@ -75,9 +95,9 @@ class DiagnosticsPageView {
 	}
 }
 
-/** 创建仅依赖现有 daemon 状态的诊断页面。 */
+/** 创建同时展示 daemon 与桌面本机能力的诊断页面。 */
 export function createDiagnosticsPage(
-	state: DaemonState,
+	state: DesktopState,
 ): InstanceType<typeof Adw.PreferencesPage> {
 	const statusIcon = new Gtk.Image({ iconName: 'network-offline-symbolic' });
 	const connectionRow = new Adw.ActionRow({ title: '', subtitle: '' });
@@ -90,6 +110,16 @@ export function createDiagnosticsPage(
 	connectionGroup.add(serverRow);
 	connectionGroup.add(protocolRow);
 	connectionGroup.add(capabilityRow);
+
+	const fcitxServiceRow = new Adw.ActionRow({ title: 'Fcitx 5', subtitle: '' });
+	const voxspellAddonRow = new Adw.ActionRow({ title: 'VoxSpell 扩展', subtitle: '' });
+	const rimeRow = new Adw.ActionRow({ title: 'Rime', subtitle: '' });
+	const currentInputMethodRow = new Adw.ActionRow({ title: '当前输入法', subtitle: '' });
+	const inputMethodGroup = new Adw.PreferencesGroup({ title: '输入法环境' });
+	inputMethodGroup.add(fcitxServiceRow);
+	inputMethodGroup.add(voxspellAddonRow);
+	inputMethodGroup.add(rimeRow);
+	inputMethodGroup.add(currentInputMethodRow);
 
 	const configurationRow = new Adw.ActionRow({ title: '配置状态', subtitle: '' });
 	const providerRow = new Adw.ActionRow({ title: '当前识别服务', subtitle: '' });
@@ -117,6 +147,7 @@ export function createDiagnosticsPage(
 
 	const root = new Adw.PreferencesPage({ title: '诊断' });
 	root.add(connectionGroup);
+	root.add(inputMethodGroup);
 	root.add(configurationGroup);
 	root.add(actionGroup);
 	const view = new DiagnosticsPageView(
@@ -126,6 +157,10 @@ export function createDiagnosticsPage(
 		serverRow,
 		protocolRow,
 		capabilityRow,
+		fcitxServiceRow,
+		voxspellAddonRow,
+		rimeRow,
+		currentInputMethodRow,
 		configurationRow,
 		providerRow,
 		credentialRow,
@@ -155,6 +190,37 @@ function getCapabilityDescription(state: DaemonState): string {
 	const partial = capabilities.partialTranscript ? '实时识别' : '批量识别';
 	const polishing = capabilities.polishPreview ? '润色预览' : '无润色预览';
 	return `${partial} · ${polishing}`;
+}
+
+function getFcitxServiceDescription(state: DesktopState): string {
+	if (state.inputMethodDiagnostics.phase === 'loading') return '正在检查…';
+	if (state.inputMethodDiagnostics.phase === 'ready') return '正在运行，D-Bus 可访问';
+	if (state.inputMethodDiagnostics.phase === 'unavailable') {
+		return state.inputMethodDiagnostics.errorMessage ?? '未运行或 D-Bus 不可访问';
+	}
+	return '尚未检查';
+}
+
+function getVoxSpellAddonDescription(state: DesktopState): string {
+	const addonStatus = state.inputMethodDiagnostics.diagnostics?.voxspellAddonStatus;
+	if (addonStatus === 'enabled') return '已安装并启用';
+	if (addonStatus === 'disabled') return '已安装但未启用';
+	if (addonStatus === 'unavailable') return '未发现';
+	return '无法确认';
+}
+
+function getRimeDescription(state: DesktopState): string {
+	const rimeStatus = state.inputMethodDiagnostics.diagnostics?.rimeStatus;
+	if (rimeStatus === 'active') return '当前正在使用';
+	if (rimeStatus === 'enabled') return '已加入当前输入法组';
+	if (rimeStatus === 'available') return '可用，但未加入当前输入法组';
+	if (rimeStatus === 'disabled') return '扩展已安装但未启用';
+	if (rimeStatus === 'unavailable') return '未发现可用的 Rime 输入法';
+	return '无法确认';
+}
+
+function getCurrentInputMethodDescription(state: DesktopState): string {
+	return state.inputMethodDiagnostics.diagnostics?.currentInputMethod ?? '—';
 }
 
 function getConfigurationDescription(state: DaemonState): string {

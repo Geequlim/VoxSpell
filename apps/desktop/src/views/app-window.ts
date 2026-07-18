@@ -20,7 +20,7 @@ const createPage = {
 	'input-behavior': (state: DesktopState) => createInputBehaviorPage(state.inputBehavior),
 	dictionary: (state: DesktopState) => createDictionaryPage(state.dictionary),
 	'ai-polishing': (state: DesktopState) => createAiPolishingPage(state.config),
-	diagnostics: (state: DesktopState) => createDiagnosticsPage(state.daemon),
+	diagnostics: (state: DesktopState) => createDiagnosticsPage(state),
 	about: () => createAboutPage(),
 } satisfies Record<PageId, (state: DesktopState) => InstanceType<typeof Gtk.Widget>>;
 

@@ -1,6 +1,7 @@
 {
 	"extends": "../../tsconfig.base.json",
 	"compilerOptions": {
+		"resolveJsonModule": true,
 		"rootDir": "."
 	},
 	"include": ["src", "test", "vitest.config.ts"]

@@ -1,4 +1,5 @@
 import path from 'node:path';
+import daemonPackage from '../../package.json';
 
 import {
 	StreamMessageReader,
@@ -157,7 +158,7 @@ export class DaemonRuntime {
 		);
 		const rpcConnection = new DaemonRpcConnection({
 			connection,
-			serverInfo: { name: 'voxspell-daemon', version: '0.0.0' },
+			serverInfo: { name: 'voxspell-daemon', version: daemonPackage.version },
 			capabilities: {
 				partialTranscript: getAsrProvider()?.capabilities.partialResults ?? false,
 				polishPreview: getTextPolisher() !== undefined,

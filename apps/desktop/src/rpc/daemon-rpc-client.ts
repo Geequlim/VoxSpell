@@ -1,4 +1,5 @@
 import { createConnection } from 'node:net';
+import desktopPackage from '../../package.json';
 
 import { PROTOCOL_VERSION } from '@voxspell/protocol/common';
 import {
@@ -327,7 +328,7 @@ export class DaemonRpcClient {
 			const result = await this.#requestWithTimeout(
 				connection.sendRequest(InitializeRequest, {
 					protocolVersion: PROTOCOL_VERSION,
-					clientInfo: { name: 'voxspell-desktop', version: '0.0.0' },
+					clientInfo: { name: 'voxspell-desktop', version: desktopPackage.version },
 				}),
 				'initialize',
 			);

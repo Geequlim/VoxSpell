@@ -15,6 +15,26 @@ export interface InputBehaviorConfig {
 	readonly polishingToggleKey: string;
 }
 
+export type RimeStatus =
+	| 'active'
+	| 'enabled'
+	| 'available'
+	| 'disabled'
+	| 'unavailable'
+	| 'unknown';
+export type FcitxAddonStatus = 'enabled' | 'disabled' | 'unavailable' | 'unknown';
+
+export interface InputMethodDiagnostics {
+	readonly currentInputMethod: string;
+	readonly rimeStatus: RimeStatus;
+	readonly voxspellAddonStatus: FcitxAddonStatus;
+}
+
+interface FcitxAddon {
+	readonly name: string;
+	readonly enabled: boolean;
+}
+
 /** 通过 Fcitx Controller D-Bus 读取和更新 VoxSpell addon 配置。 */
 export class FcitxInputBehaviorClient {
 	#proxy?: InstanceType<typeof Gio.DBusProxy>;
@@ -44,6 +64,43 @@ export class FcitxInputBehaviorClient {
 				GLib.Variant.newVariant(values),
 			]),
 		);
+	}
+
+	/** 直接通过 Fcitx Controller 检查输入法与 addon 能力。 */
+	async getInputMethodDiagnostics(): Promise<InputMethodDiagnostics> {
+		const emptyParameters = GLib.Variant.newTuple([]);
+		const currentResult = await this.#call('CurrentInputMethod', emptyParameters);
+		const currentInputMethod = currentResult.getChildValue(0).getString()[0];
+		const [availableResult, groupResult, addonsResult] = await Promise.allSettled([
+			this.#call('AvailableInputMethods', emptyParameters),
+			this.#call(
+				'FullInputMethodGroupInfo',
+				GLib.Variant.newTuple([GLib.Variant.newString('')]),
+			),
+			this.#call('GetAddons', emptyParameters),
+		]);
+		const availableInputMethods =
+			availableResult.status === 'fulfilled'
+				? readStructNames(availableResult.value.getChildValue(0))
+				: undefined;
+		const enabledInputMethods =
+			groupResult.status === 'fulfilled'
+				? readStructNames(groupResult.value.getChildValue(4))
+				: undefined;
+		const addons =
+			addonsResult.status === 'fulfilled'
+				? readAddons(addonsResult.value.getChildValue(0))
+				: undefined;
+		return {
+			currentInputMethod,
+			rimeStatus: getRimeStatus(
+				currentInputMethod,
+				availableInputMethods,
+				enabledInputMethods,
+				addons,
+			),
+			voxspellAddonStatus: getAddonStatus(addons, 'voxspell'),
+		};
 	}
 
 	#getProxy(): InstanceType<typeof Gio.DBusProxy> {
@@ -81,6 +138,49 @@ export class FcitxInputBehaviorClient {
 			);
 		});
 	}
+}
+
+function readStructNames(values: InstanceType<typeof GLib.Variant>): ReadonlySet<string> {
+	const names = new Set<string>();
+	for (let index = 0; index < values.nChildren(); index += 1) {
+		names.add(values.getChildValue(index).getChildValue(0).getString()[0]);
+	}
+	return names;
+}
+
+function readAddons(values: InstanceType<typeof GLib.Variant>): readonly FcitxAddon[] {
+	const addons: FcitxAddon[] = [];
+	for (let index = 0; index < values.nChildren(); index += 1) {
+		const addon = values.getChildValue(index);
+		addons.push({
+			name: addon.getChildValue(0).getString()[0],
+			enabled: addon.getChildValue(5).getBoolean(),
+		});
+	}
+	return addons;
+}
+
+function getAddonStatus(addons: readonly FcitxAddon[] | undefined, name: string): FcitxAddonStatus {
+	if (!addons) return 'unknown';
+	const addon = addons.find((candidate) => candidate.name === name);
+	if (!addon) return 'unavailable';
+	return addon.enabled ? 'enabled' : 'disabled';
+}
+
+function getRimeStatus(
+	currentInputMethod: string,
+	availableInputMethods?: ReadonlySet<string>,
+	enabledInputMethods?: ReadonlySet<string>,
+	addons?: readonly FcitxAddon[],
+): RimeStatus {
+	if (currentInputMethod === 'rime') return 'active';
+	const addonStatus = getAddonStatus(addons, 'rime');
+	if (addonStatus === 'disabled') return 'disabled';
+	if (addonStatus === 'unavailable') return 'unavailable';
+	if (enabledInputMethods?.has('rime')) return 'enabled';
+	if (availableInputMethods?.has('rime')) return 'available';
+	if (addonStatus === 'enabled' && availableInputMethods) return 'unavailable';
+	return 'unknown';
 }
 
 function parseInputBehavior(values: InstanceType<typeof GLib.Variant>): InputBehaviorConfig {

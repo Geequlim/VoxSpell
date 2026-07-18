@@ -23,7 +23,8 @@ export function runApplication(): number {
 		}
 
 		const client = new DaemonRpcClient({ socketPath: resolveDaemonSocketPath() });
-		const state = new DesktopState(client, new FcitxInputBehaviorClient());
+		const fcitxClient = new FcitxInputBehaviorClient();
+		const state = new DesktopState(client, fcitxClient, fcitxClient);
 		const window = createAppWindow(application, state);
 		Gtk.IconTheme.getForDisplay(window.getDisplay()).addSearchPath(
 			path.join(__dirname, 'icons'),
