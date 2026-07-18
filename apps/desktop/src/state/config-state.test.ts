@@ -98,6 +98,7 @@ describe('ConfigState', () => {
 		const state = createTestState();
 		await vi.waitFor(() => expect(state.config.draft).toBeDefined());
 		expect(state.config.model).toBe('old-model');
+		expect(state.config.providerDisplayNames).toEqual(['OpenRouter']);
 		expect(state.config.selectedCredentialName).toBe('OPENROUTER_API_KEY');
 		expect(state.config.selectedCredentialStatus).toBe('由 daemon 运行环境提供');
 
@@ -227,6 +228,10 @@ describe('ConfigState', () => {
 		expect(state.config.canDeleteProvider).toBe(true);
 		state.config.deleteActiveProvider();
 		expect(state.config.providerIds).toEqual(['openrouter']);
+		state.config.selectNewProviderType(1);
+		state.config.updateNewProviderId('realtime');
+		state.config.addProvider();
+		expect(state.config.activeProviderSupportsRealtime).toBe(true);
 		disposeTestState(state);
 	});
 

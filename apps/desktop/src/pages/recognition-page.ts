@@ -19,9 +19,11 @@ class RecognitionPageView {
 	@bind.disposeOnDestroy readonly root: InstanceType<typeof Adw.PreferencesPage>;
 	@bind.render<InstanceType<typeof Adw.ComboRow>>((state, row, self) => {
 		self.$updatingProvider = true;
-		if (!hasSameItems(self.$providerItems, state.providerIds)) {
-			self.$providerModel.splice(0, self.$providerItems.length, [...state.providerIds]);
-			self.$providerItems = [...state.providerIds];
+		if (!hasSameItems(self.$providerItems, state.providerDisplayNames)) {
+			self.$providerModel.splice(0, self.$providerItems.length, [
+				...state.providerDisplayNames,
+			]);
+			self.$providerItems = [...state.providerDisplayNames];
 		}
 		if (row.selected !== state.selectedProviderIndex)
 			row.selected = state.selectedProviderIndex;
@@ -35,7 +37,7 @@ class RecognitionPageView {
 	@bind.prop('subtitle', (state) => state.providerTypeTitle)
 	readonly providerTypeRow: InstanceType<typeof Adw.ActionRow>;
 	@bind.prop('text', (state) => state.providerId)
-	@bind.prop('title', (state) => getFieldTitle('Provider ID', state.fieldErrors.providerId))
+	@bind.prop('title', (state) => getFieldTitle('服务标识', state.fieldErrors.providerId))
 	@bind.listen<InstanceType<typeof Adw.EntryRow>>('changed', (state, row) =>
 		state.updateProviderId(row.text),
 	)
@@ -116,7 +118,7 @@ class RecognitionPageView {
 	)
 	readonly deleteCredentialButton: InstanceType<typeof Gtk.Button>;
 	@bind.prop('text', (state) => state.newProviderId)
-	@bind.prop('title', (state) => getFieldTitle('新 Provider ID', state.fieldErrors.newProviderId))
+	@bind.prop('title', (state) => getFieldTitle('新服务标识', state.fieldErrors.newProviderId))
 	@bind.listen<InstanceType<typeof Adw.EntryRow>>('changed', (state, row) =>
 		state.updateNewProviderId(row.text),
 	)
@@ -147,8 +149,8 @@ class RecognitionPageView {
 	@bind.click((state, _button, self) =>
 		showDeleteConfirmation(
 			self.root,
-			'删除当前 Provider？',
-			`Provider ${state.providerId} 将从配置中移除，已存储凭据会保留。`,
+			'删除当前识别服务？',
+			`识别服务 ${state.providerDisplayName} 将从配置中移除，已存储凭据会保留。`,
 			() => state.deleteActiveProvider(),
 		),
 	)
@@ -219,18 +221,18 @@ export function createRecognitionPage(
 ): InstanceType<typeof Adw.PreferencesPage> {
 	const providerModel = Gtk.StringList.new([]);
 	const providerRow = new Adw.ComboRow({
-		title: 'Provider',
+		title: '识别服务',
 		useSubtitle: true,
 		model: providerModel,
 	});
 	const providerTypeRow = new Adw.ActionRow({ title: '接口类型', subtitle: '' });
-	const providerIdRow = createFormEntryRow('Provider ID');
+	const providerIdRow = createFormEntryRow('服务标识');
 	const baseUrlRow = createFormEntryRow('API 地址');
 	const modelRow = createFormEntryRow('模型');
 	const apiKeyEnvironmentRow = createFormEntryRow('凭据名称');
 	const engineModelRow = createFormEntryRow('引擎模型');
 	const providerGroup = new Adw.PreferencesGroup({
-		title: '语音识别 Provider',
+		title: '语音识别服务',
 		description: '切换并编辑 daemon 中已有的识别服务配置。',
 	});
 	providerGroup.add(providerRow);
@@ -263,21 +265,21 @@ export function createRecognitionPage(
 	credentialGroup.add(credentialValueRow);
 	credentialGroup.add(credentialStatusRow);
 
-	const newProviderIdRow = createFormEntryRow('新 Provider ID');
+	const newProviderIdRow = createFormEntryRow('新服务标识');
 	const newProviderTypeRow = new Adw.ComboRow({
-		title: 'Provider 类型',
+		title: '服务类型',
 		model: Gtk.StringList.new(['OpenAI 兼容转写', '腾讯云实时识别']),
 	});
 	const addProviderButton = new Gtk.Button({
-		label: '添加 Provider',
+		label: '添加识别服务',
 		valign: Gtk.Align.CENTER,
 		cssClasses: ['suggested-action'],
 	});
-	const addProviderRow = new Adw.ActionRow({ title: '创建新 Provider' });
+	const addProviderRow = new Adw.ActionRow({ title: '创建新识别服务' });
 	addProviderRow.addSuffix(addProviderButton);
 	const providerManagementGroup = new Adw.PreferencesGroup({
-		title: '新增 Provider',
-		description: 'Provider 创建后类型固定；详细字段在创建后编辑。',
+		title: '新增识别服务',
+		description: '识别服务创建后类型固定；详细字段在创建后编辑。',
 	});
 	providerManagementGroup.add(newProviderIdRow);
 	providerManagementGroup.add(newProviderTypeRow);
@@ -291,7 +293,7 @@ export function createRecognitionPage(
 	operationRow.addPrefix(operationErrorIcon);
 	const reloadButton = new Gtk.Button({ label: '重新加载', valign: Gtk.Align.CENTER });
 	const deleteProviderButton = new Gtk.Button({
-		label: '删除 Provider',
+		label: '删除识别服务',
 		valign: Gtk.Align.CENTER,
 		cssClasses: ['destructive-action'],
 	});

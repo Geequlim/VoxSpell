@@ -51,6 +51,7 @@ describe('DaemonState', () => {
 		await vi.advanceTimersByTimeAsync(500);
 		await vi.waitFor(() => expect(state.connectionPhase).toBe('connected'));
 		expect(state.statusTitle).toBe('Daemon 已连接');
+		expect(state.statusIconName).toBe('process-completed-symbolic');
 		expect(client.connect).toHaveBeenCalledTimes(2);
 		state.dispose();
 	});

@@ -1,4 +1,5 @@
 import { Adw, Gtk } from '../gtk';
+import { getProviderDisplayName } from '../provider-display';
 import { gtk } from '../state/gtk';
 
 import type { DaemonState } from '../state/daemon-state';
@@ -23,7 +24,7 @@ class DiagnosticsPageView {
 	readonly capabilityRow: InstanceType<typeof Adw.ActionRow>;
 	@bind.prop('subtitle', (state) => getConfigurationDescription(state))
 	readonly configurationRow: InstanceType<typeof Adw.ActionRow>;
-	@bind.prop('subtitle', (state) => state.status?.activeProvider ?? '—')
+	@bind.prop('subtitle', (state) => getActiveProviderDescription(state))
 	readonly providerRow: InstanceType<typeof Adw.ActionRow>;
 	@bind.prop('subtitle', (state) => getMissingCredentialDescription(state))
 	readonly credentialRow: InstanceType<typeof Adw.ActionRow>;
@@ -91,7 +92,7 @@ export function createDiagnosticsPage(
 	connectionGroup.add(capabilityRow);
 
 	const configurationRow = new Adw.ActionRow({ title: '配置状态', subtitle: '' });
-	const providerRow = new Adw.ActionRow({ title: '当前 Provider', subtitle: '' });
+	const providerRow = new Adw.ActionRow({ title: '当前识别服务', subtitle: '' });
 	const credentialRow = new Adw.ActionRow({ title: '缺失凭据', subtitle: '' });
 	const configPathRow = new Adw.ActionRow({ title: '配置文件', subtitle: '' });
 	const credentialsPathRow = new Adw.ActionRow({ title: '凭据存储', subtitle: '' });
@@ -167,4 +168,9 @@ function getMissingCredentialDescription(state: DaemonState): string {
 	const names = state.status?.missingCredentialNames;
 	if (!names) return '—';
 	return names.length > 0 ? names.join('、') : '无';
+}
+
+function getActiveProviderDescription(state: DaemonState): string {
+	const providerId = state.status?.activeProvider;
+	return providerId ? getProviderDisplayName(providerId) : '—';
 }

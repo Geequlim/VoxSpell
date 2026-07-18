@@ -1,12 +1,12 @@
 import type { DesktopState } from '../desktop-state';
 import { Adw, Gtk } from '../gtk';
 import { createAboutPage } from '../pages/about-page';
+import { createAiPolishingPage } from '../pages/ai-polishing-page';
 import { createDiagnosticsPage } from '../pages/diagnostics-page';
 import { createInputBehaviorPage } from '../pages/input-behavior-page';
 import { createOverviewPage } from '../pages/overview-page';
 import { pageDefinitions } from '../pages/page-definition';
 import { createRecognitionPage } from '../pages/recognition-page';
-import { createTextProcessingPage } from '../pages/text-processing-page';
 import { gtk } from '../state/gtk';
 
 import type { PageId } from '../pages/page-definition';
@@ -17,7 +17,7 @@ const createPage = {
 	overview: (state: DesktopState) => createOverviewPage(state),
 	recognition: (state: DesktopState) => createRecognitionPage(state.config),
 	'input-behavior': (state: DesktopState) => createInputBehaviorPage(state.inputBehavior),
-	'text-processing': (state: DesktopState) => createTextProcessingPage(state.config),
+	'ai-polishing': (state: DesktopState) => createAiPolishingPage(state.config),
 	diagnostics: (state: DesktopState) => createDiagnosticsPage(state.daemon),
 	about: () => createAboutPage(),
 } satisfies Record<PageId, (state: DesktopState) => InstanceType<typeof Gtk.Widget>>;

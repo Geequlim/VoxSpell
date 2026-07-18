@@ -58,7 +58,7 @@ export class DaemonState {
 		if (this.connectionPhase !== 'connected') return 'network-offline-symbolic';
 		if (this.status?.state === 'degraded') return 'dialog-warning-symbolic';
 		if (this.status?.state === 'needs-configuration') return 'preferences-system-symbolic';
-		return 'emblem-ok-symbolic';
+		return 'process-completed-symbolic';
 	}
 
 	@derived get retryVisible(): boolean {

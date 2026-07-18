@@ -4,6 +4,7 @@ import { toJS } from 'mobx';
 import { ResponseError } from 'vscode-jsonrpc';
 
 import { action, derived, disposeState, effect, state, value } from './index';
+import { getProviderDisplayName } from '../provider-display';
 
 import type { AsrProviderConfig, VoxSpellConfig } from '@voxspell/config/config-schema';
 import type {
@@ -54,6 +55,10 @@ export class ConfigState {
 		return this.draft?.asr.providers.map((provider) => provider.id) ?? [];
 	}
 
+	@derived get providerDisplayNames(): readonly string[] {
+		return this.providerIds.map((providerId) => getProviderDisplayName(providerId));
+	}
+
 	@derived get activeProvider(): AsrProviderConfig | undefined {
 		return this.draft?.asr.providers.find(
 			(provider) => provider.id === this.draft?.asr.activeProvider,
@@ -76,6 +81,14 @@ export class ConfigState {
 
 	@derived get providerId(): string {
 		return this.activeProvider?.id ?? '';
+	}
+
+	@derived get providerDisplayName(): string {
+		return getProviderDisplayName(this.providerId);
+	}
+
+	@derived get activeProviderSupportsRealtime(): boolean {
+		return this.activeProvider?.type === 'tencent-realtime';
 	}
 
 	@derived get baseUrl(): string {
@@ -168,7 +181,7 @@ export class ConfigState {
 
 	@derived get selectedCredentialStatus(): string {
 		const name = this.selectedCredentialName;
-		if (!name) return '当前 Provider 不需要凭据';
+		if (!name) return '当前识别服务不需要凭据';
 		if (this.pendingCredentialValues[name]) return '已输入新值，保存后生效';
 		if (this.storedCredentialNames.includes(name)) return '已安全存储';
 		const activeProviderId = this.draft?.asr.activeProvider;
@@ -237,7 +250,7 @@ export class ConfigState {
 	@derived get operationDescription(): string {
 		if (this.phase === 'loading') return '正在读取 daemon 配置…';
 		if (this.phase === 'saving') return '正在校验并保存配置…';
-		if (this.phase === 'testing') return '正在测试 Provider 连接…';
+		if (this.phase === 'testing') return '正在测试识别服务连接…';
 		if (this.phase === 'saved') return '更改已保存并应用。';
 		if (this.phase === 'error') {
 			const fieldErrorDescription = Object.entries(this.fieldErrors)
@@ -246,7 +259,7 @@ export class ConfigState {
 			return fieldErrorDescription || this.errorMessage || '配置操作失败。';
 		}
 		if (this.providerTestResult) {
-			return `Provider 测试成功，耗时 ${this.providerTestResult.latencyMs} ms。`;
+			return `识别服务测试成功，耗时 ${this.providerTestResult.latencyMs} ms。`;
 		}
 		if (!this.config && this.draft) return '尚无配置，请填写后保存第一份配置。';
 		return '';
@@ -419,7 +432,7 @@ export class ConfigState {
 		if (!this.draft) return;
 		const id = this.newProviderId.trim();
 		if (!id || this.providerIds.includes(id)) {
-			this.fieldErrors.newProviderId = id ? 'Provider ID 已存在。' : '请输入 Provider ID。';
+			this.fieldErrors.newProviderId = id ? '服务标识已存在。' : '请输入服务标识。';
 			return;
 		}
 		if (this.newProviderType === 'tencent-realtime') {
@@ -505,12 +518,12 @@ export class ConfigState {
 		);
 		const fieldErrors: Record<string, string> = {};
 		const providerIds = candidate.asr.providers.map((item) => item.id);
-		if (providerIds.some((id) => !id.trim())) fieldErrors.providerId = '请输入 Provider ID。';
+		if (providerIds.some((id) => !id.trim())) fieldErrors.providerId = '请输入服务标识。';
 		if (new Set(providerIds).size !== providerIds.length) {
-			fieldErrors.providerId = 'Provider ID 不能重复。';
+			fieldErrors.providerId = '服务标识不能重复。';
 		}
 		if (!provider) {
-			fieldErrors.provider = '请选择有效的 Provider。';
+			fieldErrors.provider = '请选择有效的识别服务。';
 		} else if (provider.type === 'openai-compatible-transcription') {
 			provider.baseUrl = provider.baseUrl.trim();
 			provider.model = provider.model.trim();
@@ -533,7 +546,7 @@ export class ConfigState {
 					(item) => item.id === polishing.activeProvider,
 				);
 				if (!textPolisher) {
-					fieldErrors.textPolisher = '请选择有效的润色 Provider。';
+					fieldErrors.textPolisher = '请选择有效的润色服务。';
 				} else {
 					textPolisher.baseUrl = textPolisher.baseUrl.trim();
 					textPolisher.model = textPolisher.model.trim();
@@ -715,11 +728,11 @@ function createInitialConfig(): VoxSpellConfig {
 function describeConfigError(error: unknown): string {
 	if (error instanceof ResponseError) {
 		const data = error.data as ProtocolErrorData | undefined;
-		if (data?.code === 'CREDENTIAL_MISSING') return 'Provider 所需凭据尚未配置完整。';
+		if (data?.code === 'CREDENTIAL_MISSING') return '识别服务所需凭据尚未配置完整。';
 		if (data?.code === 'CONFIG_INVALID') return 'Daemon 拒绝了无效配置。';
 		if (data?.code === 'CONFIG_APPLY_FAILED') return '配置无法应用，原配置仍然有效。';
 		if (data?.code === 'PROVIDER_TEST_FAILED') {
-			return `Provider 测试失败：${data.providerCode ?? 'UNKNOWN_ERROR'}。`;
+			return `识别服务测试失败：${data.providerCode ?? 'UNKNOWN_ERROR'}。`;
 		}
 	}
 	return '无法完成配置操作，请检查 daemon 连接后重试。';
@@ -727,14 +740,14 @@ function describeConfigError(error: unknown): string {
 
 function getFieldLabel(field: string): string {
 	const labels: Readonly<Record<string, string>> = {
-		providerId: 'Provider ID',
-		provider: '语音识别 Provider',
+		providerId: '服务标识',
+		provider: '语音识别服务',
 		baseUrl: '语音识别 API 地址',
 		model: '语音识别模型',
 		apiKeyEnvironment: '语音识别凭据名称',
 		engineModelType: '语音识别引擎模型',
 		polishingSystemPrompt: 'AI 润色系统提示词',
-		textPolisher: 'AI 润色 Provider',
+		textPolisher: 'AI 润色服务',
 		polishingBaseUrl: 'AI 润色 API 地址',
 		polishingModel: 'AI 润色模型',
 		polishingApiKeyEnvironment: 'AI 润色凭据名称',

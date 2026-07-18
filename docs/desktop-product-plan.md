@@ -217,12 +217,13 @@ $XDG_CONFIG_HOME/voxspell/credentials.json
 - 长按阈值。
 - 自动选择推荐结果。
 - 识别完成后的选择与提交行为。
-
-### 5.4 文本处理
-
 - 用户语音词典入口。
-- 数字和格式处理选项。
-- AI 润色开关、Provider 和模型。
+- 数字优化、句号裁剪和其他确定性文本处理选项。
+
+### 5.4 AI 润色
+
+- AI 润色开关、服务和模型。
+- 系统提示词配置。
 - 润色失败时的回退策略说明。
 
 ### 5.5 诊断
@@ -399,7 +400,7 @@ node-gtk 包含与 Node.js/V8 ABI 关联的原生扩展。AUR 包应在安装时
 开始对应实现前仍需逐项确认：
 
 - 正式的 freedesktop application ID；本文暂用 `io.github.geequlim.VoxSpell`。
-- 首期是否同时实现用户语音词典与 AI 润色设置页。
+- 首期是否同时实现输入行为中的用户语音词典入口与 AI 润色设置页。
 - 首个 AUR 版本支持 Arch 当前 Node.js，还是额外声明一个经过验证的版本范围。
 
 配置切换已确定为不取消活动会话，新会话使用切换后的 Provider；Fcitx 配置由 daemon 内部的薄 DBus 适配层通过 `org.fcitx.Fcitx.Controller1` 管理。其余事项未确认前不得通过隐式默认值将其固化为公开配置或发行行为。

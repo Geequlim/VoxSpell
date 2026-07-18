@@ -1,4 +1,5 @@
 import { Adw, Gtk } from '../gtk';
+import { getProviderDisplayName } from '../provider-display';
 import { gtk } from '../state/gtk';
 
 import type { DesktopState } from '../desktop-state';
@@ -20,6 +21,12 @@ class OverviewPageView {
 	readonly retryButton: InstanceType<typeof Gtk.Button>;
 	@bind.prop('subtitle', (state) => getActiveProviderDescription(state))
 	readonly providerRow: InstanceType<typeof Adw.ActionRow>;
+	@bind.visible(
+		(state) =>
+			state.daemon.connectionPhase === 'connected' &&
+			state.config.activeProviderSupportsRealtime,
+	)
+	readonly realtimeBadge: InstanceType<typeof Gtk.Label>;
 	@bind.prop('subtitle', (state) => getPolishingDescription(state))
 	readonly polishingRow: InstanceType<typeof Adw.ActionRow>;
 	@bind.prop('subtitle', (state) => getServerDescription(state))
@@ -35,6 +42,7 @@ class OverviewPageView {
 		statusRow: InstanceType<typeof Adw.ActionRow>,
 		retryButton: InstanceType<typeof Gtk.Button>,
 		providerRow: InstanceType<typeof Adw.ActionRow>,
+		realtimeBadge: InstanceType<typeof Gtk.Label>,
 		polishingRow: InstanceType<typeof Adw.ActionRow>,
 		serverRow: InstanceType<typeof Adw.ActionRow>,
 		recognitionButton: InstanceType<typeof Gtk.Button>,
@@ -45,6 +53,7 @@ class OverviewPageView {
 		this.statusRow = statusRow;
 		this.retryButton = retryButton;
 		this.providerRow = providerRow;
+		this.realtimeBadge = realtimeBadge;
 		this.polishingRow = polishingRow;
 		this.serverRow = serverRow;
 		this.recognitionButton = recognitionButton;
@@ -65,8 +74,14 @@ export function createOverviewPage(state: DesktopState): InstanceType<typeof Adw
 	});
 	statusGroup.add(statusRow);
 
-	const providerRow = new Adw.ActionRow({ title: '语音识别 Provider', subtitle: '' });
-	const polishingRow = new Adw.ActionRow({ title: 'AI 文本润色', subtitle: '' });
+	const providerRow = new Adw.ActionRow({ title: '当前识别服务', subtitle: '' });
+	const realtimeBadge = new Gtk.Label({
+		label: '实时',
+		valign: Gtk.Align.CENTER,
+		cssClasses: ['caption', 'accent'],
+	});
+	providerRow.addSuffix(realtimeBadge);
+	const polishingRow = new Adw.ActionRow({ title: 'AI 润色', subtitle: '' });
 	const serverRow = new Adw.ActionRow({ title: '服务版本', subtitle: '' });
 	const configurationGroup = new Adw.PreferencesGroup({ title: '当前配置' });
 	configurationGroup.add(providerRow);
@@ -99,6 +114,7 @@ export function createOverviewPage(state: DesktopState): InstanceType<typeof Adw
 		statusRow,
 		retryButton,
 		providerRow,
+		realtimeBadge,
 		polishingRow,
 		serverRow,
 		recognitionButton,
@@ -110,12 +126,16 @@ export function createOverviewPage(state: DesktopState): InstanceType<typeof Adw
 
 function getActiveProviderDescription(state: DesktopState): string {
 	if (state.daemon.connectionPhase !== 'connected') return '等待连接 daemon';
-	return state.config.providerId || state.daemon.status?.activeProvider || '尚未配置';
+	if (state.config.providerId) return state.config.providerDisplayName;
+	const providerId = state.daemon.status?.activeProvider;
+	return providerId ? getProviderDisplayName(providerId) : '尚未配置';
 }
 
 function getPolishingDescription(state: DesktopState): string {
 	if (!state.config.draft) return '尚未配置';
-	return state.config.polishingEnabled ? '已启用' : '未启用';
+	const status = state.config.polishingEnabled ? '已启用' : '未启用';
+	const model = state.config.polishingModel || '未配置模型';
+	return `${status} · ${model}`;
 }
 
 function getServerDescription(state: DesktopState): string {

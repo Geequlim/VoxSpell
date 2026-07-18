@@ -4,10 +4,10 @@ import { createFormEntryRow, createFormPasswordEntryRow } from './form-row';
 
 import type { ConfigState } from '../state/config-state';
 
-const bind = gtk<ConfigState, TextProcessingPageView>();
+const bind = gtk<ConfigState, AiPolishingPageView>();
 
 @bind.view
-class TextProcessingPageView {
+class AiPolishingPageView {
 	declare state?: ConfigState;
 	private $updatingPrompt = false;
 
@@ -118,8 +118,8 @@ class TextProcessingPageView {
 	}
 }
 
-/** 创建 AI 润色与后续用户词典入口页面。 */
-export function createTextProcessingPage(
+/** 创建 AI 润色配置页面。 */
+export function createAiPolishingPage(
 	state: ConfigState,
 ): InstanceType<typeof Adw.PreferencesPage> {
 	const enabledRow = new Adw.SwitchRow({
@@ -130,7 +130,7 @@ export function createTextProcessingPage(
 	const modelRow = createFormEntryRow('模型');
 	const apiKeyEnvironmentRow = createFormEntryRow('凭据名称');
 	const providerGroup = new Adw.PreferencesGroup({
-		title: 'AI 润色 Provider',
+		title: 'AI 润色服务',
 		description: '首期使用 OpenAI-compatible Chat Completions 流式接口。',
 	});
 	providerGroup.add(enabledRow);
@@ -206,12 +206,12 @@ export function createTextProcessingPage(
 	actionGroup.add(operationRow);
 	actionGroup.add(actionRow);
 
-	const root = new Adw.PreferencesPage({ title: '文本处理' });
+	const root = new Adw.PreferencesPage({ title: 'AI 润色' });
 	root.add(providerGroup);
 	root.add(credentialGroup);
 	root.add(promptGroup);
 	root.add(actionGroup);
-	const view = new TextProcessingPageView(
+	const view = new AiPolishingPageView(
 		root,
 		enabledRow,
 		baseUrlRow,
