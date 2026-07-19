@@ -20,7 +20,7 @@ describe('SystemdDaemonServiceClient', () => {
 		]);
 	});
 
-	it('reloads systemd before starting and restarting the daemon', async () => {
+	it('reloads systemd before starting and restarting a disabled daemon', async () => {
 		const runCommand = vi.fn().mockResolvedValue({ exitCode: 0, stderr: '', stdout: '' });
 		const client = new SystemdDaemonServiceClient(runCommand);
 
@@ -29,9 +29,29 @@ describe('SystemdDaemonServiceClient', () => {
 
 		expect(runCommand.mock.calls).toEqual([
 			['systemctl', ['--user', 'daemon-reload']],
+			['systemctl', ['--user', 'is-enabled', 'voxspell.service']],
 			['systemctl', ['--user', 'start', 'voxspell.service']],
 			['systemctl', ['--user', 'daemon-reload']],
+			['systemctl', ['--user', 'is-enabled', 'voxspell.service']],
 			['systemctl', ['--user', 'restart', 'voxspell.service']],
+		]);
+	});
+
+	it('reenables an enabled daemon before starting it', async () => {
+		const runCommand = vi.fn().mockImplementation(async (_command, arguments_) => ({
+			exitCode: 0,
+			stderr: '',
+			stdout: arguments_[1] === 'is-enabled' ? 'enabled\n' : '',
+		}));
+		const client = new SystemdDaemonServiceClient(runCommand);
+
+		await client.start();
+
+		expect(runCommand.mock.calls).toEqual([
+			['systemctl', ['--user', 'daemon-reload']],
+			['systemctl', ['--user', 'is-enabled', 'voxspell.service']],
+			['systemctl', ['--user', 'reenable', 'voxspell.service']],
+			['systemctl', ['--user', 'start', 'voxspell.service']],
 		]);
 	});
 
@@ -57,5 +77,6 @@ describe('SystemdDaemonServiceClient', () => {
 		const client = new SystemdDaemonServiceClient(runCommand);
 
 		await expect(client.start()).rejects.toThrow('Unit voxspell.service not found.');
+		expect(runCommand).toHaveBeenCalledTimes(1);
 	});
 });

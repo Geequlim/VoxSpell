@@ -85,7 +85,7 @@ export function createOverviewPage(state: DesktopState): InstanceType<typeof Adw
 	statusRow.addSuffix(serviceButton);
 	const autostartRow = new Adw.SwitchRow({
 		title: '开机启动',
-		subtitle: '开机后自动启动 VoxSpell 后台服务。',
+		subtitle: '登录桌面后自动启动 VoxSpell 后台服务。',
 	});
 	const serviceOperationRow = new Adw.ActionRow({ title: '后台服务', subtitle: '' });
 	const statusGroup = new Adw.PreferencesGroup({

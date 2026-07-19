@@ -2,6 +2,8 @@
 Description=VoxSpell voice input daemon
 StartLimitIntervalSec=30
 StartLimitBurst=5
+After=graphical-session.target
+PartOf=graphical-session.target
 
 [Service]
 Type=simple
@@ -10,4 +12,4 @@ Restart=on-failure
 RestartSec=2
 
 [Install]
-WantedBy=default.target
+WantedBy=graphical-session.target

@@ -73,6 +73,14 @@ export class SystemdDaemonServiceClient implements DaemonServiceClient {
 
 	async #reloadAndRun(action: 'restart' | 'start'): Promise<void> {
 		await this.#runSystemctl(['daemon-reload']);
+		const enabledState = await this.#runCommand('systemctl', [
+			'--user',
+			'is-enabled',
+			DAEMON_SERVICE_NAME,
+		]);
+		if (enabledState.stdout.trim() === 'enabled') {
+			await this.#runSystemctl(['reenable', DAEMON_SERVICE_NAME]);
+		}
 		await this.#runSystemctl([action, DAEMON_SERVICE_NAME]);
 	}
 
