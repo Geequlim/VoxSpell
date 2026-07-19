@@ -21,9 +21,9 @@ export type ResolvedAsrProvider =
 	| ResolvedOpenAiCompatibleTranscriptionProvider
 	| ResolvedTencentRealtimeProvider;
 
-const TENCENT_APP_ID_ENVIRONMENT = 'TENCENT_CLOUD_ASR_APPID';
-const TENCENT_SECRET_ID_ENVIRONMENT = 'TENCENT_CLOUD_ASR_SECRET_ID';
-const TENCENT_SECRET_KEY_ENVIRONMENT = 'TENCENT_CLOUD_ASR_SECRET_KEY';
+export const TENCENT_APP_ID_ENVIRONMENT = 'TENCENT_CLOUD_ASR_APPID';
+export const TENCENT_SECRET_ID_ENVIRONMENT = 'TENCENT_CLOUD_ASR_SECRET_ID';
+export const TENCENT_SECRET_KEY_ENVIRONMENT = 'TENCENT_CLOUD_ASR_SECRET_KEY';
 
 /** 表示 ASR Provider 配置或密钥引用无法解析。 */
 export class AsrProviderConfigError extends Error {

@@ -2,12 +2,19 @@ import {
 	MAXIMUM_RECORDING_SECONDS,
 	MINIMUM_RECORDING_SECONDS,
 } from '@voxspell/config/config-schema';
+import {
+	TENCENT_APP_ID_ENVIRONMENT,
+	TENCENT_SECRET_ID_ENVIRONMENT,
+	TENCENT_SECRET_KEY_ENVIRONMENT,
+} from '@voxspell/config/asr-provider';
 
 import { Adw, Gtk } from '../gtk';
 import { gtk } from '../state/gtk';
 import { createFormEntryRow, createFormPasswordEntryRow } from './form-row';
 
 import type { ConfigState } from '../state/config-state';
+import type { AsrProviderConfig } from '@voxspell/config/config-schema';
+import type { CredentialValueUpdate } from '@voxspell/protocol/credentials';
 
 const bind = gtk<ConfigState, RecognitionPageView>();
 
@@ -41,8 +48,13 @@ class RecognitionPageView {
 	readonly providerRow: InstanceType<typeof Adw.ComboRow>;
 	@bind.prop('subtitle', (state) => state.providerTypeTitle)
 	readonly providerTypeRow: InstanceType<typeof Adw.ActionRow>;
-	@bind.prop('subtitle', (state) => state.providerId)
-	readonly providerIdRow: InstanceType<typeof Adw.ActionRow>;
+	@bind.prop('text', (state) => state.providerId)
+	@bind.prop('title', (state) => getFieldTitle('服务标识', state.fieldErrors.providerId))
+	@bind.listen<InstanceType<typeof Adw.EntryRow>>('changed', (state, row) =>
+		state.updateProviderId(row.text),
+	)
+	@bind.sensitive((state) => state.isEditable)
+	readonly providerIdRow: InstanceType<typeof Adw.EntryRow>;
 	@bind.prop('text', (state) => state.baseUrl)
 	@bind.prop('title', (state) => getFieldTitle('API 地址', state.fieldErrors.baseUrl))
 	@bind.listen<InstanceType<typeof Adw.EntryRow>>('changed', (state, row) =>
@@ -139,22 +151,9 @@ class RecognitionPageView {
 		),
 	)
 	readonly deleteCredentialButton: InstanceType<typeof Gtk.Button>;
-	@bind.prop('text', (state) => state.newProviderId)
-	@bind.prop('title', (state) => getFieldTitle('新服务标识', state.fieldErrors.newProviderId))
-	@bind.listen<InstanceType<typeof Adw.EntryRow>>('changed', (state, row) =>
-		state.updateNewProviderId(row.text),
-	)
 	@bind.sensitive((state) => state.isEditable)
-	readonly newProviderIdRow: InstanceType<typeof Adw.EntryRow>;
-	@bind.prop('selected', (state) => state.newProviderTypeIndex)
-	@bind.listen<InstanceType<typeof Adw.ComboRow>>('notify::selected', (state, row) =>
-		state.selectNewProviderType(row.selected),
-	)
-	@bind.sensitive((state) => state.isEditable)
-	readonly newProviderTypeRow: InstanceType<typeof Adw.ComboRow>;
-	@bind.sensitive((state) => state.canAddProvider)
-	@bind.click((state) => state.addProvider())
-	readonly addProviderButton: InstanceType<typeof Gtk.Button>;
+	@bind.click((state, _button, self) => showCreateProviderDialog(self.root, state))
+	readonly newProviderButton: InstanceType<typeof Gtk.Button>;
 	@bind.prop('subtitle', (state) => state.operationDescription)
 	@bind.prop('title', (state) => state.operationTitle)
 	@bind.visible((state) => Boolean(state.operationDescription))
@@ -181,7 +180,7 @@ class RecognitionPageView {
 		credentialModel: InstanceType<typeof Gtk.StringList>,
 		providerRow: InstanceType<typeof Adw.ComboRow>,
 		providerTypeRow: InstanceType<typeof Adw.ActionRow>,
-		providerIdRow: InstanceType<typeof Adw.ActionRow>,
+		providerIdRow: InstanceType<typeof Adw.EntryRow>,
 		baseUrlRow: InstanceType<typeof Adw.EntryRow>,
 		modelRow: InstanceType<typeof Adw.EntryRow>,
 		apiKeyEnvironmentRow: InstanceType<typeof Adw.EntryRow>,
@@ -193,9 +192,7 @@ class RecognitionPageView {
 		credentialFocusController: InstanceType<typeof Gtk.EventControllerFocus>,
 		credentialStatusRow: InstanceType<typeof Adw.ActionRow>,
 		deleteCredentialButton: InstanceType<typeof Gtk.Button>,
-		newProviderIdRow: InstanceType<typeof Adw.EntryRow>,
-		newProviderTypeRow: InstanceType<typeof Adw.ComboRow>,
-		addProviderButton: InstanceType<typeof Gtk.Button>,
+		newProviderButton: InstanceType<typeof Gtk.Button>,
 		operationRow: InstanceType<typeof Adw.ActionRow>,
 		operationErrorIcon: InstanceType<typeof Gtk.Image>,
 		deleteProviderButton: InstanceType<typeof Gtk.Button>,
@@ -218,9 +215,7 @@ class RecognitionPageView {
 		this.credentialFocusController = credentialFocusController;
 		this.credentialStatusRow = credentialStatusRow;
 		this.deleteCredentialButton = deleteCredentialButton;
-		this.newProviderIdRow = newProviderIdRow;
-		this.newProviderTypeRow = newProviderTypeRow;
-		this.addProviderButton = addProviderButton;
+		this.newProviderButton = newProviderButton;
 		this.operationRow = operationRow;
 		this.operationErrorIcon = operationErrorIcon;
 		this.deleteProviderButton = deleteProviderButton;
@@ -239,14 +234,20 @@ export function createRecognitionPage(
 		model: providerModel,
 	});
 	const providerTypeRow = new Adw.ActionRow({ title: '接口类型', subtitle: '' });
-	const providerIdRow = new Adw.ActionRow({ title: '服务标识', subtitle: '' });
+	const providerIdRow = createFormEntryRow('服务标识');
 	const baseUrlRow = createFormEntryRow('API 地址');
 	const modelRow = createFormEntryRow('模型');
 	const apiKeyEnvironmentRow = createFormEntryRow('凭据名称');
 	const engineModelRow = createFormEntryRow('引擎模型');
+	const newProviderButton = new Gtk.Button({
+		label: '新建',
+		valign: Gtk.Align.CENTER,
+		cssClasses: ['flat'],
+	});
 	const providerGroup = new Adw.PreferencesGroup({
 		title: '语音识别服务',
 		description: '切换并编辑 daemon 中已有的识别服务配置。',
+		headerSuffix: newProviderButton,
 	});
 	providerGroup.add(providerRow);
 	providerGroup.add(providerTypeRow);
@@ -301,26 +302,6 @@ export function createRecognitionPage(
 	credentialGroup.add(credentialValueRow);
 	credentialGroup.add(credentialStatusRow);
 
-	const newProviderIdRow = createFormEntryRow('新服务标识');
-	const newProviderTypeRow = new Adw.ComboRow({
-		title: '服务类型',
-		model: Gtk.StringList.new(['OpenAI 兼容转写', '腾讯云实时识别']),
-	});
-	const addProviderButton = new Gtk.Button({
-		label: '添加识别服务',
-		valign: Gtk.Align.CENTER,
-		cssClasses: ['suggested-action'],
-	});
-	const addProviderRow = new Adw.ActionRow({ title: '创建新识别服务' });
-	addProviderRow.addSuffix(addProviderButton);
-	const providerManagementGroup = new Adw.PreferencesGroup({
-		title: '新增识别服务',
-		description: '识别服务创建后类型固定；详细字段在创建后编辑。',
-	});
-	providerManagementGroup.add(newProviderIdRow);
-	providerManagementGroup.add(newProviderTypeRow);
-	providerManagementGroup.add(addProviderRow);
-
 	const operationErrorIcon = new Gtk.Image({
 		iconName: 'dialog-error-symbolic',
 		cssClasses: ['error'],
@@ -347,7 +328,6 @@ export function createRecognitionPage(
 	root.add(recordingGroup);
 	root.add(textProcessingGroup);
 	root.add(credentialGroup);
-	root.add(providerManagementGroup);
 	root.add(actionGroup);
 	const view = new RecognitionPageView(
 		root,
@@ -367,9 +347,7 @@ export function createRecognitionPage(
 		credentialFocusController,
 		credentialStatusRow,
 		deleteCredentialButton,
-		newProviderIdRow,
-		newProviderTypeRow,
-		addProviderButton,
+		newProviderButton,
 		operationRow,
 		operationErrorIcon,
 		deleteProviderButton,
@@ -385,6 +363,165 @@ function getFieldTitle(title: string, error?: string): string {
 
 function hasSameItems(current: readonly string[], next: readonly string[]): boolean {
 	return current.length === next.length && current.every((item, index) => item === next[index]);
+}
+
+function showCreateProviderDialog(
+	parent: InstanceType<typeof Gtk.Widget>,
+	state: ConfigState,
+): void {
+	const providerIdRow = createFormEntryRow('服务标识');
+	const providerTypeRow = new Adw.ComboRow({
+		title: '服务类型',
+		model: Gtk.StringList.new(['OpenAI 兼容转写', '腾讯云实时识别']),
+	});
+	const baseUrlRow = createFormEntryRow('API 地址');
+	baseUrlRow.text = 'https://api.openai.com/v1';
+	const modelRow = createFormEntryRow('模型');
+	const apiKeyEnvironmentRow = createFormEntryRow('凭据名称');
+	const engineModelRow = createFormEntryRow('引擎模型');
+	engineModelRow.text = '16k_zh';
+	const providerGroup = new Adw.PreferencesGroup({
+		title: '服务配置',
+		description: '服务类型创建后固定，其他信息仍可在主页面继续编辑。',
+	});
+	providerGroup.add(providerIdRow);
+	providerGroup.add(providerTypeRow);
+	providerGroup.add(baseUrlRow);
+	providerGroup.add(modelRow);
+	providerGroup.add(apiKeyEnvironmentRow);
+	providerGroup.add(engineModelRow);
+
+	const apiKeyRow = createFormPasswordEntryRow('API 密钥（可选）');
+	const tencentAppIdRow = createFormPasswordEntryRow('App ID（可选）');
+	const tencentSecretIdRow = createFormPasswordEntryRow('Secret ID（可选）');
+	const tencentSecretKeyRow = createFormPasswordEntryRow('Secret Key（可选）');
+	const credentialGroup = new Adw.PreferencesGroup({
+		title: '凭据',
+		description: '留空时继续从 daemon 运行环境读取；填写后安全保存到应用凭据库。',
+	});
+	credentialGroup.add(apiKeyRow);
+	credentialGroup.add(tencentAppIdRow);
+	credentialGroup.add(tencentSecretIdRow);
+	credentialGroup.add(tencentSecretKeyRow);
+
+	const errorIcon = new Gtk.Image({ iconName: 'dialog-error-symbolic', cssClasses: ['error'] });
+	const errorRow = new Adw.ActionRow({ title: '无法创建识别服务', subtitle: '', visible: false });
+	errorRow.addPrefix(errorIcon);
+	const errorGroup = new Adw.PreferencesGroup();
+	errorGroup.add(errorRow);
+
+	const page = new Adw.PreferencesPage();
+	page.add(providerGroup);
+	page.add(credentialGroup);
+	page.add(errorGroup);
+	const cancelButton = new Gtk.Button({ label: '取消' });
+	const createButton = new Gtk.Button({ label: '创建', cssClasses: ['suggested-action'] });
+	const header = new Adw.HeaderBar({
+		titleWidget: new Adw.WindowTitle({ title: '新建识别服务', subtitle: '' }),
+	});
+	const actionBox = new Gtk.Box({
+		orientation: Gtk.Orientation.HORIZONTAL,
+		spacing: 8,
+		halign: Gtk.Align.END,
+		hexpand: true,
+		marginTop: 10,
+		marginBottom: 10,
+		marginStart: 12,
+		marginEnd: 12,
+	});
+	actionBox.append(cancelButton);
+	actionBox.append(createButton);
+	const toolbar = new Adw.ToolbarView({ content: page });
+	toolbar.addTopBar(header);
+	toolbar.addBottomBar(actionBox);
+	const dialog = new Adw.Dialog({
+		title: '新建识别服务',
+		child: toolbar,
+		contentWidth: 560,
+		contentHeight: 620,
+		defaultWidget: createButton,
+		focusWidget: providerIdRow,
+	});
+
+	let generatedCredentialName = '';
+	providerIdRow.on('changed', () => {
+		const id = providerIdRow.text.trim();
+		const nextCredentialName = `VOXSPELL_${id.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_API_KEY`;
+		if (!apiKeyEnvironmentRow.text || apiKeyEnvironmentRow.text === generatedCredentialName) {
+			apiKeyEnvironmentRow.text = nextCredentialName;
+		}
+		generatedCredentialName = nextCredentialName;
+	});
+	const updateVisibleRows = (): void => {
+		const showsOpenAiFields = providerTypeRow.selected === 0;
+		baseUrlRow.visible = showsOpenAiFields;
+		modelRow.visible = showsOpenAiFields;
+		apiKeyEnvironmentRow.visible = showsOpenAiFields;
+		apiKeyRow.visible = showsOpenAiFields;
+		engineModelRow.visible = !showsOpenAiFields;
+		tencentAppIdRow.visible = !showsOpenAiFields;
+		tencentSecretIdRow.visible = !showsOpenAiFields;
+		tencentSecretKeyRow.visible = !showsOpenAiFields;
+	};
+	providerTypeRow.on('notify::selected', updateVisibleRows);
+	updateVisibleRows();
+
+	const setBusy = (busy: boolean): void => {
+		dialog.canClose = !busy;
+		page.sensitive = !busy;
+		cancelButton.sensitive = !busy;
+		createButton.sensitive = !busy;
+	};
+	const showError = (): void => {
+		providerIdRow.title = getFieldTitle('服务标识', state.fieldErrors.providerId);
+		baseUrlRow.title = getFieldTitle('API 地址', state.fieldErrors.baseUrl);
+		modelRow.title = getFieldTitle('模型', state.fieldErrors.model);
+		apiKeyEnvironmentRow.title = getFieldTitle('凭据名称', state.fieldErrors.apiKeyEnvironment);
+		engineModelRow.title = getFieldTitle('引擎模型', state.fieldErrors.engineModelType);
+		errorRow.subtitle = state.operationDescription;
+		errorRow.visible = true;
+	};
+	let created = false;
+	const create = async (): Promise<void> => {
+		const id = providerIdRow.text.trim();
+		let provider: AsrProviderConfig;
+		const credentials: CredentialValueUpdate[] = [];
+		if (providerTypeRow.selected === 1) {
+			provider = {
+				id,
+				type: 'tencent-realtime',
+				engineModelType: engineModelRow.text.trim(),
+			};
+			[
+				[TENCENT_APP_ID_ENVIRONMENT, tencentAppIdRow.text],
+				[TENCENT_SECRET_ID_ENVIRONMENT, tencentSecretIdRow.text],
+				[TENCENT_SECRET_KEY_ENVIRONMENT, tencentSecretKeyRow.text],
+			].forEach(([name, value]) => {
+				if (value) credentials.push({ name, value });
+			});
+		} else {
+			const credentialName = apiKeyEnvironmentRow.text.trim();
+			provider = {
+				id,
+				type: 'openai-compatible-transcription',
+				baseUrl: baseUrlRow.text.trim(),
+				apiKeyEnvironment: credentialName,
+				model: modelRow.text.trim(),
+			};
+			if (apiKeyRow.text) credentials.push({ name: credentialName, value: apiKeyRow.text });
+		}
+		setBusy(true);
+		created = await state.createProvider(provider, credentials);
+		setBusy(false);
+		if (created) dialog.close();
+		else showError();
+	};
+	cancelButton.on('clicked', () => dialog.close());
+	createButton.on('clicked', () => void create());
+	dialog.on('closed', () => {
+		if (!created) state.clearOperationResult();
+	});
+	dialog.present(parent);
 }
 
 function showDeleteConfirmation(

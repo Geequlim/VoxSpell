@@ -251,24 +251,100 @@ describe('ConfigState', () => {
 		disposeTestState(state);
 	});
 
-	it('adds and removes typed providers without deleting stored credentials', async () => {
+	it('creates complete OpenAI providers with optional stored credentials', async () => {
 		const state = createTestState();
 		await vi.waitFor(() => expect(state.config.draft).toBeDefined());
-		state.config.updateNewProviderId('backup');
-		state.config.addProvider();
+
+		await expect(
+			state.config.createProvider(
+				{
+					id: 'backup',
+					type: 'openai-compatible-transcription',
+					baseUrl: 'https://api.example.com/v1',
+					apiKeyEnvironment: 'BACKUP_API_KEY',
+					model: 'whisper-large',
+				},
+				[{ name: 'BACKUP_API_KEY', value: 'backup-secret' }],
+			),
+		).resolves.toBe(true);
 
 		expect(state.config.activeProvider).toMatchObject({
 			id: 'backup',
 			type: 'openai-compatible-transcription',
-			apiKeyEnvironment: 'VOXSPELL_BACKUP_API_KEY',
+			baseUrl: 'https://api.example.com/v1',
+			apiKeyEnvironment: 'BACKUP_API_KEY',
+			model: 'whisper-large',
 		});
+		expect(state.client.updateCredentials).toHaveBeenCalledWith({
+			set: [{ name: 'BACKUP_API_KEY', value: 'backup-secret' }],
+			delete: [],
+		});
+		expect(state.config.selectedProviderIndex).toBe(1);
 		expect(state.config.canDeleteProvider).toBe(true);
+		disposeTestState(state);
+	});
+
+	it('creates Tencent providers without requiring stored credentials', async () => {
+		const state = createTestState();
+		await vi.waitFor(() => expect(state.config.draft).toBeDefined());
+
+		await expect(
+			state.config.createProvider(
+				{
+					id: 'realtime',
+					type: 'tencent-realtime',
+					engineModelType: '16k_zh',
+				},
+				[],
+			),
+		).resolves.toBe(true);
+
+		expect(state.config.activeProviderSupportsRealtime).toBe(true);
+		expect(state.client.updateCredentials).not.toHaveBeenCalled();
 		state.config.deleteActiveProvider();
 		expect(state.config.providerIds).toEqual(['openrouter']);
-		state.config.selectNewProviderType(1);
-		state.config.updateNewProviderId('realtime');
-		state.config.addProvider();
-		expect(state.config.activeProviderSupportsRealtime).toBe(true);
+		expect(state.config.selectedProviderIndex).toBe(0);
+		disposeTestState(state);
+	});
+
+	it('edits provider identifiers inline without losing the selected provider', async () => {
+		const state = createTestState();
+		await vi.waitFor(() => expect(state.config.draft).toBeDefined());
+
+		state.config.updateProviderId('renamed');
+		expect(state.config.activeProvider?.id).toBe('renamed');
+		expect(state.config.draft?.asr.activeProvider).toBe('renamed');
+		await state.config.flushPendingChanges();
+
+		expect(state.client.config?.asr.activeProvider).toBe('renamed');
+		expect(state.config.providerIds).toEqual(['renamed']);
+		expect(state.config.selectedProviderIndex).toBe(0);
+		disposeTestState(state);
+	});
+
+	it('keeps an inline identifier editable while reporting duplicates', async () => {
+		const state = createTestState();
+		await vi.waitFor(() => expect(state.config.draft).toBeDefined());
+		await state.config.createProvider(
+			{
+				id: 'backup',
+				type: 'openai-compatible-transcription',
+				baseUrl: 'https://api.example.com/v1',
+				apiKeyEnvironment: 'BACKUP_API_KEY',
+				model: 'whisper-large',
+			},
+			[],
+		);
+		state.config.selectProvider(0);
+		state.client.updateConfig.mockClear();
+
+		state.config.updateProviderId('backup');
+		expect(state.config.activeProvider).toMatchObject({ model: 'old-model' });
+		await state.config.flushPendingChanges();
+
+		expect(state.config.fieldErrors.providerId).toBe('服务标识不能重复。');
+		expect(state.config.selectedProviderIndex).toBe(0);
+		expect(state.client.updateConfig).not.toHaveBeenCalled();
 		disposeTestState(state);
 	});
 

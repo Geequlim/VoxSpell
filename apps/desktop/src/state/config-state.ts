@@ -21,7 +21,6 @@ import type { ProviderTestResult } from '@voxspell/protocol/provider';
 import type { DaemonState } from './daemon-state';
 
 export type ConfigOperationPhase = 'idle' | 'loading' | 'saving' | 'testing' | 'saved' | 'error';
-export type NewProviderType = 'openai-compatible-transcription' | 'tencent-realtime';
 
 export interface ConfigClient {
 	getConfig(): Promise<VoxSpellConfig | null>;
@@ -43,8 +42,7 @@ export class ConfigState {
 	@value phase: ConfigOperationPhase = 'idle';
 	@value errorMessage?: string;
 	@value fieldErrors: Record<string, string> = {};
-	@value newProviderType: NewProviderType = 'openai-compatible-transcription';
-	@value newProviderId = '';
+	@value selectedProviderIndex = 0;
 	@value providerTestResult?: ProviderTestResult;
 	private readonly $client: ConfigClient;
 	private readonly $daemon: DaemonState;
@@ -71,15 +69,7 @@ export class ConfigState {
 	}
 
 	@derived get activeProvider(): AsrProviderConfig | undefined {
-		return this.draft?.asr.providers.find(
-			(provider) => provider.id === this.draft?.asr.activeProvider,
-		);
-	}
-
-	@derived get selectedProviderIndex(): number {
-		const activeProviderId = this.draft?.asr.activeProvider;
-		const index = this.providerIds.findIndex((providerId) => providerId === activeProviderId);
-		return Math.max(index, 0);
+		return this.draft?.asr.providers[this.selectedProviderIndex];
 	}
 
 	@derived get providerTypeTitle(): string {
@@ -234,15 +224,6 @@ export class ConfigState {
 		);
 	}
 
-	@derived get canAddProvider(): boolean {
-		const id = this.newProviderId.trim();
-		return this.isEditable && Boolean(id) && !this.providerIds.includes(id);
-	}
-
-	@derived get newProviderTypeIndex(): number {
-		return this.newProviderType === 'tencent-realtime' ? 1 : 0;
-	}
-
 	@derived get canDeleteProvider(): boolean {
 		return this.isEditable && this.providerIds.length > 1;
 	}
@@ -322,11 +303,21 @@ export class ConfigState {
 
 	/** 切换当前编辑的既有 Provider。 */
 	@action selectProvider(index: number): void {
-		const providerId = this.providerIds[index];
-		if (!this.draft || !providerId) return;
-		this.draft.asr.activeProvider = providerId;
+		const provider = this.draft?.asr.providers[index];
+		if (!this.draft || !provider) return;
+		this.selectedProviderIndex = index;
+		this.draft.asr.activeProvider = provider.id;
 		this.selectFirstCredential();
 		this.scheduleAutoSave();
+	}
+
+	/** 更新当前 Provider 的服务标识，并保持它处于选中状态。 */
+	@action updateProviderId(value: string): void {
+		const provider = this.activeProvider;
+		if (!this.draft || !provider) return;
+		provider.id = value;
+		this.draft.asr.activeProvider = value;
+		this.scheduleAutoSave(500);
 	}
 
 	/** 选择当前准备更新的凭据名称。 */
@@ -457,56 +448,55 @@ export class ConfigState {
 		this.scheduleAutoSave();
 	}
 
-	/** 更新新建 Provider 的类型。 */
-	@action selectNewProviderType(index: number): void {
-		this.newProviderType = index === 1 ? 'tencent-realtime' : 'openai-compatible-transcription';
-		this.clearOperationResult();
-	}
+	/** 校验并保存一份完整的新 Provider 与用户主动填写的凭据。 */
+	async createProvider(
+		provider: AsrProviderConfig,
+		credentialEntries: readonly CredentialsUpdateParams['set'][number][],
+	): Promise<boolean> {
+		if (!this.draft || !this.isEditable) return false;
+		await this.flushPendingChanges();
+		if (!this.draft || this.phase === 'error') return false;
 
-	/** 更新新建 Provider ID 草稿。 */
-	@action updateNewProviderId(value: string): void {
-		this.newProviderId = value;
-		this.clearOperationResult();
-	}
+		const candidate = structuredClone(toJS(this.draft));
+		const normalizedProvider = structuredClone(provider);
+		normalizedProvider.id = normalizedProvider.id.trim();
+		candidate.asr.providers.push(normalizedProvider);
+		candidate.asr.activeProvider = normalizedProvider.id;
+		const selectedProviderIndex = candidate.asr.providers.length - 1;
+		const fieldErrors = validateConfigCandidate(candidate, selectedProviderIndex);
+		if (Object.keys(fieldErrors).length > 0) {
+			this.applyValidationErrors(fieldErrors);
+			return false;
+		}
 
-	/** 向配置草稿添加一个类型固定的新 Provider。 */
-	@action addProvider(): void {
-		if (!this.draft) return;
-		const id = this.newProviderId.trim();
-		if (!id || this.providerIds.includes(id)) {
-			this.fieldErrors.newProviderId = id ? '服务标识已存在。' : '请输入服务标识。';
-			return;
+		this.phase = 'saving';
+		this.errorMessage = undefined;
+		this.fieldErrors = {};
+		try {
+			if (credentialEntries.length > 0) {
+				await this.$client.updateCredentials({ set: [...credentialEntries], delete: [] });
+			}
+			await this.$client.validateConfig(candidate);
+			await this.$client.updateConfig(candidate);
+			this.applyCreatedProvider(candidate, selectedProviderIndex, credentialEntries);
+			await this.$daemon.refresh();
+			return true;
+		} catch (error) {
+			this.applyOperationError(error);
+			return false;
 		}
-		if (this.newProviderType === 'tencent-realtime') {
-			this.draft.asr.providers.push({
-				id,
-				type: 'tencent-realtime',
-				engineModelType: '16k_zh',
-			});
-		} else {
-			const credentialName = `VOXSPELL_${id.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_API_KEY`;
-			this.draft.asr.providers.push({
-				id,
-				type: 'openai-compatible-transcription',
-				baseUrl: 'https://api.openai.com/v1',
-				apiKeyEnvironment: credentialName,
-				model: '',
-			});
-		}
-		this.draft.asr.activeProvider = id;
-		this.newProviderId = '';
-		this.selectFirstCredential();
-		this.scheduleAutoSave();
 	}
 
 	/** 删除当前 Provider，并先切换到剩余的第一个 Provider。 */
 	@action deleteActiveProvider(): void {
 		if (!this.draft || this.draft.asr.providers.length <= 1) return;
-		const providerId = this.draft.asr.activeProvider;
 		const credentialNames = this.requiredCredentialNames;
-		const providers = this.draft.asr.providers.filter((provider) => provider.id !== providerId);
-		this.draft.asr.providers = providers;
-		this.draft.asr.activeProvider = providers[0]!.id;
+		this.draft.asr.providers.splice(this.selectedProviderIndex, 1);
+		this.selectedProviderIndex = Math.min(
+			this.selectedProviderIndex,
+			this.draft.asr.providers.length - 1,
+		);
+		this.draft.asr.activeProvider = this.activeProvider!.id;
 		credentialNames.forEach((name) => {
 			delete this.pendingCredentialValues[name];
 			this.$credentialNamesReadyToSave.delete(name);
@@ -586,68 +576,16 @@ export class ConfigState {
 	/** 校验并自动保存当前配置快照，然后刷新 daemon 状态。 */
 	@action private async persistCurrentDraft(): Promise<void> {
 		if (!this.draft || !this.isDirty) return;
-		const candidate = structuredClone(toJS(this.draft));
-		const provider = candidate.asr.providers.find(
-			(item) => item.id === candidate.asr.activeProvider,
-		);
-		const fieldErrors: Record<string, string> = {};
-		const maximumRecordingSeconds = candidate.session?.maximumRecordingSeconds;
-		if (
-			maximumRecordingSeconds !== undefined &&
-			(!Number.isInteger(maximumRecordingSeconds) ||
-				maximumRecordingSeconds < MINIMUM_RECORDING_SECONDS ||
-				maximumRecordingSeconds > MAXIMUM_RECORDING_SECONDS)
-		) {
-			fieldErrors.maximumRecordingSeconds = `请输入 ${MINIMUM_RECORDING_SECONDS}–${MAXIMUM_RECORDING_SECONDS} 之间的整数秒数。`;
+		const draftSnapshot = structuredClone(toJS(this.draft));
+		const candidate = structuredClone(draftSnapshot);
+		const selectedProvider = candidate.asr.providers[this.selectedProviderIndex];
+		if (selectedProvider) {
+			selectedProvider.id = selectedProvider.id.trim();
+			candidate.asr.activeProvider = selectedProvider.id;
 		}
-		const providerIds = candidate.asr.providers.map((item) => item.id);
-		if (providerIds.some((id) => !id.trim())) fieldErrors.providerId = '请输入服务标识。';
-		if (new Set(providerIds).size !== providerIds.length) {
-			fieldErrors.providerId = '服务标识不能重复。';
-		}
-		if (!provider) {
-			fieldErrors.provider = '请选择有效的识别服务。';
-		} else if (provider.type === 'openai-compatible-transcription') {
-			provider.baseUrl = provider.baseUrl.trim();
-			provider.model = provider.model.trim();
-			if (!/^https?:\/\//.test(provider.baseUrl))
-				fieldErrors.baseUrl = '请输入 HTTP(S) 地址。';
-			if (!provider.model) fieldErrors.model = '请输入模型名称。';
-			if (!/^[A-Z][A-Z0-9_]*$/.test(provider.apiKeyEnvironment)) {
-				fieldErrors.apiKeyEnvironment = '凭据名称必须使用大写字母、数字和下划线。';
-			}
-		} else {
-			provider.engineModelType = provider.engineModelType.trim();
-			if (!provider.engineModelType) fieldErrors.engineModelType = '请输入引擎模型。';
-		}
-		const polishing = candidate.polishing;
-		if (polishing) {
-			polishing.systemPrompt = polishing.systemPrompt.trim();
-			if (!polishing.systemPrompt) fieldErrors.polishingSystemPrompt = '请输入系统提示词。';
-			if (polishing.enabled) {
-				const textPolisher = polishing.providers.find(
-					(item) => item.id === polishing.activeProvider,
-				);
-				if (!textPolisher) {
-					fieldErrors.textPolisher = '请选择有效的润色服务。';
-				} else {
-					textPolisher.baseUrl = textPolisher.baseUrl.trim();
-					textPolisher.model = textPolisher.model.trim();
-					if (!/^https?:\/\//.test(textPolisher.baseUrl)) {
-						fieldErrors.polishingBaseUrl = '请输入 HTTP(S) 地址。';
-					}
-					if (!textPolisher.model) fieldErrors.polishingModel = '请输入模型名称。';
-					if (!/^[A-Z][A-Z0-9_]*$/.test(textPolisher.apiKeyEnvironment)) {
-						fieldErrors.polishingApiKeyEnvironment =
-							'凭据名称必须使用大写字母、数字和下划线。';
-					}
-				}
-			}
-		}
+		const fieldErrors = validateConfigCandidate(candidate, this.selectedProviderIndex);
 		if (Object.keys(fieldErrors).length > 0) {
-			this.fieldErrors = fieldErrors;
-			this.phase = 'error';
-			this.errorMessage = '请修正表单中的配置项。';
+			this.applyValidationErrors(fieldErrors);
 			return;
 		}
 
@@ -665,7 +603,7 @@ export class ConfigState {
 			}
 			await this.$client.validateConfig(candidate);
 			await this.$client.updateConfig(candidate);
-			this.applyAutoSaved(candidate, credentialEntries);
+			this.applyAutoSaved(candidate, credentialEntries, draftSnapshot);
 			await this.$daemon.refresh();
 		} catch (error) {
 			this.applyOperationError(error);
@@ -698,6 +636,10 @@ export class ConfigState {
 	): void {
 		this.config = config ?? undefined;
 		this.draft = structuredClone(config ?? createInitialConfig());
+		const selectedProviderIndex = this.draft.asr.providers.findIndex(
+			(provider) => provider.id === this.draft?.asr.activeProvider,
+		);
+		this.selectedProviderIndex = Math.max(selectedProviderIndex, 0);
 		this.storedCredentialNames = credentials.storedNames;
 		this.pendingCredentialValues = {};
 		this.$credentialNamesReadyToSave.clear();
@@ -725,9 +667,10 @@ export class ConfigState {
 	@action private applyAutoSaved(
 		config: VoxSpellConfig,
 		credentialEntries: readonly CredentialsUpdateParams['set'][number][],
+		draftSnapshot: VoxSpellConfig = config,
 	): void {
 		this.config = config;
-		if (JSON.stringify(this.draft) === JSON.stringify(config)) {
+		if (JSON.stringify(this.draft) === JSON.stringify(draftSnapshot)) {
 			this.draft = structuredClone(config);
 		}
 		const savedNames = credentialEntries.map((entry) => entry.name);
@@ -745,6 +688,23 @@ export class ConfigState {
 		this.$loaded = true;
 	}
 
+	@action private applyCreatedProvider(
+		config: VoxSpellConfig,
+		selectedProviderIndex: number,
+		credentialEntries: readonly CredentialsUpdateParams['set'][number][],
+	): void {
+		this.selectedProviderIndex = selectedProviderIndex;
+		this.draft = structuredClone(config);
+		this.applyAutoSaved(config, credentialEntries);
+		this.selectFirstCredential();
+	}
+
+	@action private applyValidationErrors(fieldErrors: Record<string, string>): void {
+		this.fieldErrors = fieldErrors;
+		this.phase = 'error';
+		this.errorMessage = '请修正表单中的配置项。';
+	}
+
 	@action private applyOperationError(error: unknown): void {
 		this.phase = 'error';
 		this.errorMessage = describeConfigError(error);
@@ -754,7 +714,8 @@ export class ConfigState {
 		this.selectedCredentialName = this.requiredCredentialNames[0];
 	}
 
-	private clearOperationResult(): void {
+	/** 清除当前表单操作结果，供已关闭的临时编辑界面恢复主页面状态。 */
+	@action clearOperationResult(): void {
 		if (this.phase !== 'saving') this.phase = 'idle';
 		this.errorMessage = undefined;
 		this.fieldErrors = {};
@@ -789,6 +750,67 @@ export class ConfigState {
 		if (!provider) throw new Error('Active text polisher provider is not available');
 		return provider;
 	}
+}
+
+function validateConfigCandidate(
+	candidate: VoxSpellConfig,
+	selectedProviderIndex: number,
+): Record<string, string> {
+	const fieldErrors: Record<string, string> = {};
+	const maximumRecordingSeconds = candidate.session?.maximumRecordingSeconds;
+	if (
+		maximumRecordingSeconds !== undefined &&
+		(!Number.isInteger(maximumRecordingSeconds) ||
+			maximumRecordingSeconds < MINIMUM_RECORDING_SECONDS ||
+			maximumRecordingSeconds > MAXIMUM_RECORDING_SECONDS)
+	) {
+		fieldErrors.maximumRecordingSeconds = `请输入 ${MINIMUM_RECORDING_SECONDS}–${MAXIMUM_RECORDING_SECONDS} 之间的整数秒数。`;
+	}
+	const providerIds = candidate.asr.providers.map((item) => item.id);
+	if (providerIds.some((id) => !id.trim())) fieldErrors.providerId = '请输入服务标识。';
+	if (new Set(providerIds).size !== providerIds.length) {
+		fieldErrors.providerId = '服务标识不能重复。';
+	}
+	const provider = candidate.asr.providers[selectedProviderIndex];
+	if (!provider) {
+		fieldErrors.provider = '请选择有效的识别服务。';
+	} else if (provider.type === 'openai-compatible-transcription') {
+		provider.baseUrl = provider.baseUrl.trim();
+		provider.model = provider.model.trim();
+		if (!/^https?:\/\//.test(provider.baseUrl)) fieldErrors.baseUrl = '请输入 HTTP(S) 地址。';
+		if (!provider.model) fieldErrors.model = '请输入模型名称。';
+		if (!/^[A-Z][A-Z0-9_]*$/.test(provider.apiKeyEnvironment)) {
+			fieldErrors.apiKeyEnvironment = '凭据名称必须使用大写字母、数字和下划线。';
+		}
+	} else {
+		provider.engineModelType = provider.engineModelType.trim();
+		if (!provider.engineModelType) fieldErrors.engineModelType = '请输入引擎模型。';
+	}
+	const polishing = candidate.polishing;
+	if (polishing) {
+		polishing.systemPrompt = polishing.systemPrompt.trim();
+		if (!polishing.systemPrompt) fieldErrors.polishingSystemPrompt = '请输入系统提示词。';
+		if (polishing.enabled) {
+			const textPolisher = polishing.providers.find(
+				(item) => item.id === polishing.activeProvider,
+			);
+			if (!textPolisher) {
+				fieldErrors.textPolisher = '请选择有效的润色服务。';
+			} else {
+				textPolisher.baseUrl = textPolisher.baseUrl.trim();
+				textPolisher.model = textPolisher.model.trim();
+				if (!/^https?:\/\//.test(textPolisher.baseUrl)) {
+					fieldErrors.polishingBaseUrl = '请输入 HTTP(S) 地址。';
+				}
+				if (!textPolisher.model) fieldErrors.polishingModel = '请输入模型名称。';
+				if (!/^[A-Z][A-Z0-9_]*$/.test(textPolisher.apiKeyEnvironment)) {
+					fieldErrors.polishingApiKeyEnvironment =
+						'凭据名称必须使用大写字母、数字和下划线。';
+				}
+			}
+		}
+	}
+	return fieldErrors;
 }
 
 /** 创建首次配置所需的最小 OpenAI 兼容 Provider 草稿。 */
