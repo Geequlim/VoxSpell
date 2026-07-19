@@ -72,6 +72,30 @@ async function transcribe(baseUrl: string): Promise<AsrEvent[]> {
 }
 
 describe('OpenAiCompatibleAsrProvider', () => {
+	it('retries a transient provider failure once with the same audio', async () => {
+		let count = 0;
+		const server = createServer(async (request, reply) => {
+			count += 1;
+			for await (const chunk of request) void chunk;
+			if (count === 1) {
+				reply.writeHead(500, { 'content-type': 'application/json' });
+				reply.end(JSON.stringify({ error: { message: 'temporary failure' } }));
+				return;
+			}
+			reply.writeHead(200, { 'content-type': 'application/json' });
+			reply.end(JSON.stringify({ text: '重试成功' }));
+		});
+		servers.push(server);
+		await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+		const address = server.address() as AddressInfo;
+
+		await expect(transcribe(`http://127.0.0.1:${address.port}/api/v1`)).resolves.toEqual([
+			{ type: 'ready' },
+			{ type: 'completed', text: '重试成功' },
+		]);
+		expect(count).toBe(2);
+	});
+
 	it('uses the SDK multipart upload and returns completed text', async () => {
 		const { baseUrl, received } = await startServer(200, { text: '识别成功' });
 		const events = await transcribe(baseUrl);

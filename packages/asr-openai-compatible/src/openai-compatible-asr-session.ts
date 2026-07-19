@@ -10,6 +10,9 @@ import type { AsrEvent } from '@voxspell/asr-core/realtime-asr';
 import type { AsrSessionOptions } from '@voxspell/asr-core/realtime-asr';
 import type { RealtimeAsrSession } from '@voxspell/asr-core/realtime-asr';
 
+const MAX_TRANSCRIPTION_ATTEMPTS = 2;
+const RETRY_DELAY_MILLISECONDS = 400;
+
 const TranscriptionResponseSchema = Type.Object(
 	{ text: Type.String({ minLength: 1, pattern: '\\S' }) },
 	{ additionalProperties: true },
@@ -109,15 +112,28 @@ export class OpenAiCompatibleAsrSession implements RealtimeAsrSession {
 			const file = await toFile(wave, `${this.#session.sessionId}.wav`, {
 				type: 'audio/wav',
 			});
-			const response: unknown = await this.#client.audio.transcriptions.create(
-				{
-					file,
-					model: this.#model,
-					response_format: 'json',
-					stream: false,
-				},
-				{ signal: this.#requestController.signal },
-			);
+			let response: unknown;
+			for (let attempt = 1; attempt <= MAX_TRANSCRIPTION_ATTEMPTS; attempt += 1) {
+				try {
+					response = await this.#client.audio.transcriptions.create(
+						{
+							file,
+							model: this.#model,
+							response_format: 'json',
+							stream: false,
+						},
+						{ signal: this.#requestController.signal },
+					);
+					break;
+				} catch (error) {
+					const errorEvent = createAsrErrorEvent(error);
+					if (!errorEvent.retryable || attempt === MAX_TRANSCRIPTION_ATTEMPTS) {
+						yield errorEvent;
+						return;
+					}
+					await this.#waitBeforeRetry();
+				}
+			}
 			if (!Value.Check(TranscriptionResponseSchema, response)) {
 				yield { type: 'error', code: 'INVALID_RESPONSE', retryable: false };
 				return;
@@ -135,5 +151,24 @@ export class OpenAiCompatibleAsrSession implements RealtimeAsrSession {
 		if (this.#signal && this.#abortListener) {
 			this.#signal.removeEventListener('abort', this.#abortListener);
 		}
+	}
+
+	async #waitBeforeRetry(): Promise<void> {
+		await new Promise<void>((resolve, reject) => {
+			const timeout = setTimeout(() => {
+				this.#requestController.signal.removeEventListener('abort', abort);
+				resolve();
+			}, RETRY_DELAY_MILLISECONDS);
+			const abort = (): void => {
+				clearTimeout(timeout);
+				this.#requestController.signal.removeEventListener('abort', abort);
+				reject(this.#requestController.signal.reason);
+			};
+			if (this.#requestController.signal.aborted) {
+				abort();
+				return;
+			}
+			this.#requestController.signal.addEventListener('abort', abort, { once: true });
+		});
 	}
 }
