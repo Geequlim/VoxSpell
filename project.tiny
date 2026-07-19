@@ -155,6 +155,9 @@ publish:
 
 tools:
   actions:
+    - name: version
+      description: 更新所有包和 Fcitx addon 的版本号
+      command: node scripts/update-version.mts
     - name: clean
       description: 清理所有 dist 目录和用户目录安装的 Fcitx C++ 扩展
       command:
