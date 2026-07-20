@@ -222,7 +222,13 @@ export class SessionCoordinator {
 		this.#updatePolishingState(active);
 
 		try {
-			active.asr = await asrProvider.createSession({ sessionId: active.id });
+			active.asr = await asrProvider.createSession({
+				sessionId: active.id,
+				vocabulary: active.dictionary.entries.map((entry) => ({
+					text: entry.term,
+					weight: Math.ceil(entry.boost / 2),
+				})),
+			});
 			await active.asr.start(active.abortController.signal);
 			active.eventPump = this.#consumeAsrEvents(active);
 		} catch (error) {
@@ -453,6 +459,12 @@ export class SessionCoordinator {
 	async #handleAsrEvent(active: ActiveSession, event: AsrEvent): Promise<boolean> {
 		switch (event.type) {
 			case 'ready':
+				return false;
+			case 'preview':
+				this.#publish({
+					method: 'session.preview',
+					params: { sessionId: active.id, text: event.text },
+				});
 				return false;
 			case 'partial':
 			case 'segment-final': {

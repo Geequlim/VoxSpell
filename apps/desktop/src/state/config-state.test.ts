@@ -304,6 +304,33 @@ describe('ConfigState', () => {
 		disposeTestState(state);
 	});
 
+	it('creates and selects an incomplete Aliyun provider without requiring credentials', async () => {
+		const state = createTestState();
+		await vi.waitFor(() => expect(state.config.draft).toBeDefined());
+
+		await expect(
+			state.config.createProvider({
+				id: 'aliyun',
+				type: 'aliyun-realtime',
+				model: 'fun-asr-realtime',
+				region: 'cn-beijing',
+				context: '',
+			}),
+		).resolves.toBe(true);
+
+		expect(state.config.activeProvider).toMatchObject({
+			id: 'aliyun',
+			type: 'aliyun-realtime',
+		});
+		expect(state.config.requiredCredentialNames).toEqual([
+			'DASHSCOPE_WORKSPACE_ID',
+			'DASHSCOPE_API_KEY',
+		]);
+		expect(state.config.selectedProviderIndex).toBe(1);
+		expect(state.client.updateCredentials).not.toHaveBeenCalled();
+		disposeTestState(state);
+	});
+
 	it('updates every Tencent credential independently by name', async () => {
 		const state = createTestState();
 		await vi.waitFor(() => expect(state.config.draft).toBeDefined());

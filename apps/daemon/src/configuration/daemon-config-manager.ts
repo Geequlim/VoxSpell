@@ -52,6 +52,7 @@ export interface DaemonConfigManagerOptions {
 		config: VoxSpellConfig,
 		environment: NodeJS.ProcessEnv,
 		providerId?: string,
+		providerStateFile?: string,
 	) => RealtimeAsrProvider;
 	readonly createTextPolisher?: (
 		config: VoxSpellConfig,
@@ -67,7 +68,9 @@ export class DaemonConfigManager {
 		config: VoxSpellConfig,
 		environment: NodeJS.ProcessEnv,
 		providerId?: string,
+		providerStateFile?: string,
 	) => RealtimeAsrProvider;
+	readonly #providerStateFile?: string;
 	readonly #createTextPolisher: (
 		config: VoxSpellConfig,
 		environment: NodeJS.ProcessEnv,
@@ -84,6 +87,9 @@ export class DaemonConfigManager {
 		this.#paths = options.paths;
 		this.#environment = options.environment ?? process.env;
 		this.#createProvider = options.createProvider ?? createAsrProvider;
+		this.#providerStateFile = options.createProvider
+			? undefined
+			: path.join(this.#paths.directory, 'asr-provider-state.json');
 		this.#createTextPolisher = options.createTextPolisher ?? createTextPolisher;
 	}
 
@@ -262,7 +268,7 @@ export class DaemonConfigManager {
 		credentials: VoxSpellCredentials,
 		providerId?: string,
 	): RealtimeAsrProvider {
-		return this.#createProvider(
+		return this.#invokeProviderFactory(
 			config,
 			this.#createEffectiveEnvironment(credentials),
 			providerId,
@@ -292,7 +298,7 @@ export class DaemonConfigManager {
 		const environment = this.#createEffectiveEnvironment(credentials);
 		let runtimeError: unknown;
 		try {
-			this.#asrProvider = this.#createProvider(config, environment);
+			this.#asrProvider = this.#invokeProviderFactory(config, environment);
 		} catch (error) {
 			this.#asrProvider = undefined;
 			runtimeError = error;
@@ -313,6 +319,18 @@ export class DaemonConfigManager {
 		}
 		this.#state = 'ready';
 		this.#lastError = undefined;
+	}
+
+	#invokeProviderFactory(
+		config: VoxSpellConfig,
+		environment: NodeJS.ProcessEnv,
+		providerId?: string,
+	): RealtimeAsrProvider {
+		if (this.#providerStateFile) {
+			return this.#createProvider(config, environment, providerId, this.#providerStateFile);
+		}
+		if (providerId === undefined) return this.#createProvider(config, environment);
+		return this.#createProvider(config, environment, providerId);
 	}
 
 	#recordFailure(error: unknown): void {

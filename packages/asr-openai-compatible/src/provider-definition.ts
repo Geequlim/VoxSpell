@@ -18,7 +18,7 @@ export const openAiCompatibleAsrDefinition: AsrProviderDefinition = {
 		apiKeyEnvironment: OPENAI_API_KEY_ENVIRONMENT,
 		model: 'whisper-1',
 	}),
-	fields: [
+	getFields: () => [
 		{
 			id: 'baseUrl',
 			title: 'API 地址',

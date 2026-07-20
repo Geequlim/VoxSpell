@@ -20,7 +20,7 @@ export const tencentRealtimeAsrDefinition: AsrProviderDefinition = {
 		type: 'tencent-realtime',
 		engineModelType: '16k_zh',
 	}),
-	fields: [
+	getFields: () => [
 		{
 			id: 'engineModelType',
 			title: '引擎模型',

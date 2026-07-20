@@ -1,6 +1,6 @@
 version: 1
 asr:
-  activeProvider: glm
+  activeProvider: 阿里云百炼
   providers:
     - id: openrouter
       type: openai-compatible-transcription
@@ -15,6 +15,11 @@ asr:
     - id: tencent
       type: tencent-realtime
       engineModelType: 16k_zh
+    - id: 阿里云百炼
+      type: aliyun-realtime
+      model: fun-asr-realtime
+      region: cn-beijing
+      context: ""
 textProcessing:
   trimTrailingPeriod: true
 polishing:

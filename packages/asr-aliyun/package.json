@@ -1,0 +1,26 @@
+{
+	"name": "@voxspell/asr-aliyun",
+	"version": "0.1.4",
+	"private": true,
+	"type": "module",
+	"sideEffects": false,
+	"exports": {
+		"./aliyun-asr-provider": "./src/aliyun-asr-provider.ts",
+		"./model-profile": "./src/model-profile.ts",
+		"./provider-definition": "./src/provider-definition.ts"
+	},
+	"dependencies": {
+		"@voxspell/asr-core": "workspace:^",
+		"@voxspell/config": "workspace:^",
+		"ws": "8.21.1"
+	},
+	"devDependencies": {
+		"@types/node": "24.13.3",
+		"@types/ws": "8.18.1",
+		"typescript": "7.0.2",
+		"vitest": "4.1.10"
+	},
+	"engines": {
+		"node": ">=24"
+	}
+}

@@ -17,13 +17,27 @@ export interface ResolvedTencentRealtimeProvider {
 	readonly engineModelType: string;
 }
 
+export interface ResolvedAliyunRealtimeProvider {
+	readonly id: string;
+	readonly type: 'aliyun-realtime';
+	readonly apiKey: string;
+	readonly model: 'fun-asr-realtime' | 'paraformer-realtime-v2' | 'qwen3-asr-flash-realtime';
+	readonly region: 'cn-beijing' | 'ap-southeast-1';
+	readonly workspaceId: string;
+	readonly language?: string;
+	readonly context: string;
+}
+
 export type ResolvedAsrProvider =
 	| ResolvedOpenAiCompatibleTranscriptionProvider
-	| ResolvedTencentRealtimeProvider;
+	| ResolvedTencentRealtimeProvider
+	| ResolvedAliyunRealtimeProvider;
 
 export const TENCENT_APP_ID_ENVIRONMENT = 'TENCENT_CLOUD_ASR_APPID';
 export const TENCENT_SECRET_ID_ENVIRONMENT = 'TENCENT_CLOUD_ASR_SECRET_ID';
 export const TENCENT_SECRET_KEY_ENVIRONMENT = 'TENCENT_CLOUD_ASR_SECRET_KEY';
+export const DASHSCOPE_WORKSPACE_ID_ENVIRONMENT = 'DASHSCOPE_WORKSPACE_ID';
+export const DASHSCOPE_API_KEY_ENVIRONMENT = 'DASHSCOPE_API_KEY';
 
 /** 表示 ASR Provider 配置或密钥引用无法解析。 */
 export class AsrProviderConfigError extends Error {
@@ -67,6 +81,28 @@ export function resolveAsrProvider(
 			engineModelType,
 		};
 	}
+	if (provider.type === 'aliyun-realtime') {
+		const workspaceId = getRequiredEnvironment(
+			environment,
+			DASHSCOPE_WORKSPACE_ID_ENVIRONMENT,
+			provider.id,
+		);
+		const apiKey = getRequiredEnvironment(
+			environment,
+			DASHSCOPE_API_KEY_ENVIRONMENT,
+			provider.id,
+		);
+		return {
+			id: provider.id,
+			type: provider.type,
+			apiKey,
+			model: provider.model,
+			region: provider.region,
+			workspaceId,
+			language: provider.language,
+			context: provider.context,
+		};
+	}
 
 	const baseUrl = getRequiredProviderSetting(provider.baseUrl, 'baseUrl', provider.id);
 	const model = getRequiredProviderSetting(provider.model, 'model', provider.id);
@@ -103,6 +139,9 @@ export function getAsrProviderCredentialNames(
 			TENCENT_SECRET_ID_ENVIRONMENT,
 			TENCENT_SECRET_KEY_ENVIRONMENT,
 		];
+	}
+	if (provider.type === 'aliyun-realtime') {
+		return [DASHSCOPE_WORKSPACE_ID_ENVIRONMENT, DASHSCOPE_API_KEY_ENVIRONMENT];
 	}
 	return provider.apiKeyEnvironment ? [provider.apiKeyEnvironment] : [];
 }

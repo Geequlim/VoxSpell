@@ -4,6 +4,7 @@
 	"private": true,
 	"type": "module",
 	"dependencies": {
+		"@voxspell/asr-aliyun": "workspace:^",
 		"@voxspell/asr-openai-compatible": "workspace:^",
 		"@voxspell/asr-tencent": "workspace:^",
 		"@voxspell/config": "workspace:^",

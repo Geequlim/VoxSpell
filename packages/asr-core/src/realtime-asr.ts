@@ -6,20 +6,31 @@ export interface AsrCapabilities {
 
 export interface AsrSessionOptions {
 	readonly sessionId: SessionId;
+	readonly vocabulary?: readonly AsrVocabularyEntry[];
+}
+
+export interface AsrVocabularyEntry {
+	readonly text: string;
+	readonly weight: number;
 }
 
 export type AsrEvent =
 	| { readonly type: 'ready' }
+	| { readonly type: 'preview'; readonly text: string }
 	| {
 			readonly type: 'partial';
 			readonly segmentId: string;
 			readonly revision: number;
 			readonly text: string;
+			readonly beginTimeMilliseconds?: number;
+			readonly endTimeMilliseconds?: number;
 	  }
 	| {
 			readonly type: 'segment-final';
 			readonly segmentId: string;
 			readonly text: string;
+			readonly beginTimeMilliseconds?: number;
+			readonly endTimeMilliseconds?: number;
 	  }
 	| { readonly type: 'completed'; readonly text: string }
 	| {

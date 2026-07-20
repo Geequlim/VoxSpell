@@ -98,7 +98,9 @@ export class ConfigState {
 	}
 
 	@derived get providerFields(): readonly AsrProviderFieldDefinition[] {
-		return this.activeProviderDefinition?.fields ?? [];
+		const provider = this.activeProvider;
+		if (!provider) return [];
+		return this.activeProviderDefinition?.getFields(provider) ?? [];
 	}
 
 	@derived get activeCredentialDefinitions(): readonly AsrProviderCredentialDefinition[] {

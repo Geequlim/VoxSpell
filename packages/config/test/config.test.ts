@@ -146,6 +146,41 @@ describe('VoxSpell config', () => {
 		});
 	});
 
+	it('resolves Aliyun realtime settings and its fixed API key credential', () => {
+		const config = parseVoxSpellConfig({
+			version: 1,
+			asr: {
+				activeProvider: 'aliyun',
+				providers: [
+					{
+						id: 'aliyun',
+						type: 'aliyun-realtime',
+						model: 'fun-asr-realtime',
+						region: 'cn-beijing',
+						language: 'zh',
+						context: 'VoxSpell',
+					},
+				],
+			},
+		});
+
+		expect(
+			resolveAsrProvider(config, {
+				DASHSCOPE_WORKSPACE_ID: 'workspace',
+				DASHSCOPE_API_KEY: 'secret',
+			}),
+		).toEqual({
+			id: 'aliyun',
+			type: 'aliyun-realtime',
+			apiKey: 'secret',
+			model: 'fun-asr-realtime',
+			region: 'cn-beijing',
+			workspaceId: 'workspace',
+			language: 'zh',
+			context: 'VoxSpell',
+		});
+	});
+
 	it('resolves an enabled text polisher and its system prompt', () => {
 		const config = parseVoxSpellConfig({
 			...validConfig,

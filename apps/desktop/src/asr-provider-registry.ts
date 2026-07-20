@@ -7,6 +7,7 @@ import type { AsrProviderConfig } from '@voxspell/config/config-schema';
 export const asrProviderDefinitions: readonly AsrProviderDefinition[] = [
 	openAiCompatibleAsrDefinition,
 	tencentRealtimeAsrDefinition,
+	aliyunRealtimeAsrDefinition,
 ];
 
 /** 返回指定配置对应的 Provider 公共定义。 */
@@ -15,3 +16,4 @@ export function getAsrProviderDefinition(provider: AsrProviderConfig): AsrProvid
 	if (!definition) throw new Error(`Unsupported ASR provider type: ${provider.type}`);
 	return definition;
 }
+import { aliyunRealtimeAsrDefinition } from '@voxspell/asr-aliyun/provider-definition';

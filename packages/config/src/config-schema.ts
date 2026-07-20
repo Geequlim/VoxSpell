@@ -31,9 +31,27 @@ export const TencentRealtimeProviderConfigSchema = Type.Object(
 );
 export type TencentRealtimeProviderConfig = Static<typeof TencentRealtimeProviderConfigSchema>;
 
+export const AliyunRealtimeProviderConfigSchema = Type.Object(
+	{
+		id: Type.String({ minLength: 1 }),
+		type: Type.Literal('aliyun-realtime'),
+		model: Type.Union([
+			Type.Literal('fun-asr-realtime'),
+			Type.Literal('paraformer-realtime-v2'),
+			Type.Literal('qwen3-asr-flash-realtime'),
+		]),
+		region: Type.Union([Type.Literal('cn-beijing'), Type.Literal('ap-southeast-1')]),
+		language: Type.Optional(Type.String()),
+		context: Type.String(),
+	},
+	{ additionalProperties: false },
+);
+export type AliyunRealtimeProviderConfig = Static<typeof AliyunRealtimeProviderConfigSchema>;
+
 export const AsrProviderConfigSchema = Type.Union([
 	OpenAiCompatibleTranscriptionProviderConfigSchema,
 	TencentRealtimeProviderConfigSchema,
+	AliyunRealtimeProviderConfigSchema,
 ]);
 export type AsrProviderConfig = Static<typeof AsrProviderConfigSchema>;
 

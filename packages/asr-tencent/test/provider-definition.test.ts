@@ -11,7 +11,7 @@ describe('tencentRealtimeAsrDefinition', () => {
 			type: 'tencent-realtime',
 			engineModelType: '16k_zh',
 		});
-		expect(tencentRealtimeAsrDefinition.fields.map((field) => field.id)).toEqual([
+		expect(tencentRealtimeAsrDefinition.getFields(provider).map((field) => field.id)).toEqual([
 			'engineModelType',
 		]);
 		expect(

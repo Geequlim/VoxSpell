@@ -2086,6 +2086,20 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@voxspell/asr-aliyun@workspace:^, @voxspell/asr-aliyun@workspace:packages/asr-aliyun":
+  version: 0.0.0-use.local
+  resolution: "@voxspell/asr-aliyun@workspace:packages/asr-aliyun"
+  dependencies:
+    "@types/node": "npm:24.13.3"
+    "@types/ws": "npm:8.18.1"
+    "@voxspell/asr-core": "workspace:^"
+    "@voxspell/config": "workspace:^"
+    typescript: "npm:7.0.2"
+    vitest: "npm:4.1.10"
+    ws: "npm:8.21.1"
+  languageName: unknown
+  linkType: soft
+
 "@voxspell/asr-core@workspace:^, @voxspell/asr-core@workspace:packages/asr-core":
   version: 0.0.0-use.local
   resolution: "@voxspell/asr-core@workspace:packages/asr-core"
@@ -2147,6 +2161,7 @@ __metadata:
     "@rspack/core": "npm:2.1.4"
     "@types/node": "npm:24.13.3"
     "@voxspell/ai-polisher": "workspace:^"
+    "@voxspell/asr-aliyun": "workspace:^"
     "@voxspell/asr-core": "workspace:^"
     "@voxspell/asr-openai-compatible": "workspace:^"
     "@voxspell/asr-tencent": "workspace:^"
@@ -2168,6 +2183,7 @@ __metadata:
     "@rspack/cli": "npm:2.1.4"
     "@rspack/core": "npm:2.1.4"
     "@types/node": "npm:24.13.3"
+    "@voxspell/asr-aliyun": "workspace:^"
     "@voxspell/asr-openai-compatible": "workspace:^"
     "@voxspell/asr-tencent": "workspace:^"
     "@voxspell/config": "workspace:^"

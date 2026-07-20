@@ -13,12 +13,9 @@ describe('openAiCompatibleAsrDefinition', () => {
 			apiKeyEnvironment: 'OPENAI_API_KEY',
 			model: 'whisper-1',
 		});
-		expect(openAiCompatibleAsrDefinition.fields.map((field) => field.id)).toEqual([
-			'baseUrl',
-			'model',
-			'apiKeyEnvironment',
-		]);
-		expect(openAiCompatibleAsrDefinition.fields.map((field) => field.title)).toEqual([
+		const fields = openAiCompatibleAsrDefinition.getFields(provider);
+		expect(fields.map((field) => field.id)).toEqual(['baseUrl', 'model', 'apiKeyEnvironment']);
+		expect(fields.map((field) => field.title)).toEqual([
 			'API 地址',
 			'模型',
 			'API 密钥凭据名称',

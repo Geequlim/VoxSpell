@@ -14,6 +14,18 @@ interface CredentialRowBinding {
 	readonly row: InstanceType<typeof Adw.PasswordEntryRow>;
 }
 
+type ProviderFieldRowBinding =
+	| {
+			readonly id: string;
+			readonly input: 'entry';
+			readonly row: InstanceType<typeof Adw.EntryRow>;
+	  }
+	| {
+			readonly id: string;
+			readonly input: 'choice';
+			readonly row: InstanceType<typeof Adw.ComboRow>;
+	  };
+
 const bind = gtk<ConfigState, RecognitionPageView>();
 
 @bind.view
@@ -22,8 +34,8 @@ class RecognitionPageView {
 	private readonly $providerModel: InstanceType<typeof Gtk.StringList>;
 	private $providerItems: readonly string[] = [];
 	private $credentialItems: readonly string[] = [];
-	private $providerFieldType?: string;
-	private $providerFieldRows: InstanceType<typeof Adw.EntryRow>[] = [];
+	private $providerFieldKey?: string;
+	private $providerFieldRows: readonly ProviderFieldRowBinding[] = [];
 	private $credentialRows: readonly CredentialRowBinding[] = [];
 	private $updatingProvider = false;
 	private $updatingProviderFields = false;
@@ -60,9 +72,30 @@ class RecognitionPageView {
 		const provider = state.activeProvider;
 		const definition = state.activeProviderDefinition;
 		if (!provider || !definition) return;
-		if (self.$providerFieldType !== definition.type) {
-			self.$providerFieldRows.forEach((row) => group.remove(row));
-			self.$providerFieldRows = definition.fields.map((field) => {
+		const fields = definition.getFields(provider);
+		const fieldKey = `${definition.type}:${fields
+			.map(
+				(field) =>
+					`${field.id}:${field.input}:${field.choices?.map((item) => item.value).join(',') ?? ''}`,
+			)
+			.join('|')}`;
+		if (self.$providerFieldKey !== fieldKey) {
+			self.$providerFieldRows.forEach(({ row }) => group.remove(row));
+			self.$providerFieldRows = fields.map((field) => {
+				if (field.input === 'choice') {
+					const choices = field.choices ?? [];
+					const row = new Adw.ComboRow({
+						title: field.title,
+						model: Gtk.StringList.new(choices.map((item) => item.title)),
+					});
+					row.on('notify::selected', () => {
+						if (self.$updatingProviderFields) return;
+						const value = choices[row.selected]?.value;
+						if (value !== undefined) state.updateProviderField(field.id, value);
+					});
+					group.add(row);
+					return { id: field.id, input: 'choice' as const, row };
+				}
 				const row = createFormEntryRow(field.title);
 				if (field.input === 'url') row.inputPurpose = Gtk.InputPurpose.URL;
 				row.on('changed', () => {
@@ -70,17 +103,22 @@ class RecognitionPageView {
 					state.updateProviderField(field.id, row.getText() ?? '');
 				});
 				group.add(row);
-				return row;
+				return { id: field.id, input: 'entry' as const, row };
 			});
-			self.$providerFieldType = definition.type;
+			self.$providerFieldKey = fieldKey;
 		}
 		self.$updatingProviderFields = true;
-		definition.fields.forEach((field, index) => {
-			const row = self.$providerFieldRows[index];
-			if (!row) return;
+		fields.forEach((field) => {
+			const binding = self.$providerFieldRows.find((item) => item.id === field.id);
+			if (!binding) return;
 			const value = field.getValue(provider);
-			if (row.text !== value) row.text = value;
-			row.sensitive = state.isEditable;
+			if (binding.input === 'choice') {
+				const selected = field.choices?.findIndex((item) => item.value === value) ?? -1;
+				if (selected >= 0 && binding.row.selected !== selected) {
+					binding.row.selected = selected;
+				}
+			} else if (binding.row.text !== value) binding.row.text = value;
+			binding.row.sensitive = state.isEditable;
 		});
 		self.$updatingProviderFields = false;
 	})

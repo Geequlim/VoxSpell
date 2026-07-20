@@ -50,6 +50,7 @@ develop:
       command:
         - yarn --cwd packages/protocol vitest run
         - yarn --cwd packages/asr-core vitest run
+        - yarn --cwd packages/asr-aliyun vitest run
         - yarn --cwd packages/ai-polisher vitest run
         - yarn --cwd packages/config vitest run
         - yarn --cwd packages/asr-openai-compatible vitest run
@@ -85,6 +86,11 @@ develop:
           command:
             - yarn --cwd apps/daemon rspack build
             - VOXSPELL_ASR_PROVIDER=tencent VOXSPELL_CONFIG_PATH=../../configs/config.yaml yarn --cwd apps/daemon node --enable-source-maps dist/asr-microphone-smoke.cjs
+        - name: asr-aliyun
+          description: 使用阿里云百炼实时 ASR 录制麦克风并显示实时结果
+          command:
+            - yarn --cwd apps/daemon rspack build
+            - VOXSPELL_ASR_PROVIDER=aliyun VOXSPELL_CONFIG_PATH=../../configs/config.yaml yarn --cwd apps/daemon node --enable-source-maps dist/asr-microphone-smoke.cjs
     - name: audio-smoke
       description: 录制麦克风并显示实时音量
       command:
@@ -95,6 +101,7 @@ develop:
       command:
         - yarn --cwd packages/protocol tsc --noEmit
         - yarn --cwd packages/asr-core tsc --noEmit
+        - yarn --cwd packages/asr-aliyun tsc --noEmit
         - yarn --cwd packages/ai-polisher tsc --noEmit
         - yarn --cwd packages/config tsc --noEmit
         - yarn --cwd packages/asr-openai-compatible tsc --noEmit

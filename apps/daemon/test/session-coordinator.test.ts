@@ -196,6 +196,24 @@ describe('SessionCoordinator', () => {
 		expect(context.coordinator.state).toBe('idle');
 	});
 
+	it('publishes absolute provider previews without segment assembly', async () => {
+		const context = createTestContext();
+		await context.coordinator.start('input-context-1');
+		const asr = context.asrProvider.sessions[0];
+
+		asr.emit({ type: 'preview', text: '你好' });
+		asr.emit({ type: 'preview', text: '你好世界' });
+
+		await vi.waitFor(() =>
+			expect(
+				context.events
+					.filter((event) => event.method === 'session.preview')
+					.map((event) => event.params.text),
+			).toEqual(['你好', '你好世界']),
+		);
+		await context.coordinator.cancel(SESSION_ID, 'user');
+	});
+
 	it('publishes full polished snapshots and exposes both final results', async () => {
 		const polisher = new FakeTextPolisher();
 		const dictionary = new CompiledVoiceDictionary({
