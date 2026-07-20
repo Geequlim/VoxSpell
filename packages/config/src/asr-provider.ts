@@ -42,6 +42,11 @@ export function resolveAsrProvider(
 	const provider = config.asr.providers.find((candidate) => candidate.id === providerId);
 	if (!provider) throw new AsrProviderConfigError(`ASR provider does not exist: ${providerId}`);
 	if (provider.type === 'tencent-realtime') {
+		const engineModelType = getRequiredProviderSetting(
+			provider.engineModelType,
+			'engineModelType',
+			provider.id,
+		);
 		const appId = getRequiredEnvironment(environment, TENCENT_APP_ID_ENVIRONMENT, provider.id);
 		const secretId = getRequiredEnvironment(
 			environment,
@@ -59,22 +64,29 @@ export function resolveAsrProvider(
 			appId,
 			secretId,
 			secretKey,
-			engineModelType: provider.engineModelType,
+			engineModelType,
 		};
 	}
 
-	const apiKey = environment[provider.apiKeyEnvironment];
+	const baseUrl = getRequiredProviderSetting(provider.baseUrl, 'baseUrl', provider.id);
+	const model = getRequiredProviderSetting(provider.model, 'model', provider.id);
+	const apiKeyEnvironment = getRequiredProviderSetting(
+		provider.apiKeyEnvironment,
+		'apiKeyEnvironment',
+		provider.id,
+	);
+	const apiKey = environment[apiKeyEnvironment];
 	if (!apiKey) {
 		throw new AsrProviderConfigError(
-			`ASR provider ${provider.id} requires environment variable ${provider.apiKeyEnvironment}`,
+			`ASR provider ${provider.id} requires environment variable ${apiKeyEnvironment}`,
 		);
 	}
 	return {
 		id: provider.id,
 		type: provider.type,
-		baseUrl: provider.baseUrl,
+		baseUrl,
 		apiKey,
-		model: provider.model,
+		model,
 	};
 }
 
@@ -92,7 +104,12 @@ export function getAsrProviderCredentialNames(
 			TENCENT_SECRET_KEY_ENVIRONMENT,
 		];
 	}
-	return [provider.apiKeyEnvironment];
+	return provider.apiKeyEnvironment ? [provider.apiKeyEnvironment] : [];
+}
+
+function getRequiredProviderSetting(value: string, name: string, providerId: string): string {
+	if (value) return value;
+	throw new AsrProviderConfigError(`ASR provider ${providerId} requires setting ${name}`);
 }
 
 /** 读取 Provider 必需的环境变量，但不把密钥值写入错误。 */

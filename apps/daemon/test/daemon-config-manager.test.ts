@@ -60,10 +60,87 @@ describe('DaemonConfigManager', () => {
 			asr: { activeProvider: 'openai' },
 		});
 		expect(manager.getStatus()).toMatchObject({
-			state: 'needs-configuration',
+			state: 'degraded',
 			configPath: paths.configFile,
 			missingCredentialNames: ['OPENAI_API_KEY'],
 		});
+	});
+
+	it('saves and selects an incomplete provider while clearing the previous runtime', async () => {
+		const paths = await createPaths();
+		await saveVoxSpellConfig(paths.directory, paths.configFile, validConfig);
+		const manager = new DaemonConfigManager({
+			paths,
+			environment: { OPENROUTER_API_KEY: 'secret' },
+		});
+		await manager.initialize();
+		const incompleteConfig: VoxSpellConfig = {
+			version: 1,
+			asr: {
+				activeProvider: 'unfinished',
+				providers: [
+					{
+						id: 'unfinished',
+						type: 'openai-compatible-transcription',
+						baseUrl: '',
+						apiKeyEnvironment: 'OPENAI_API_KEY',
+						model: '',
+					},
+				],
+			},
+		};
+
+		await expect(manager.updateConfig(incompleteConfig)).resolves.toBeUndefined();
+
+		expect(await loadVoxSpellConfig(paths.configFile)).toEqual(incompleteConfig);
+		expect(manager.getConfig()).toEqual(incompleteConfig);
+		expect(manager.getAsrProvider()).toBeUndefined();
+		expect(manager.getStatus()).toMatchObject({
+			state: 'degraded',
+			activeProvider: 'unfinished',
+		});
+	});
+
+	it('saves partial Tencent credentials and recovers after all slots are filled', async () => {
+		const paths = await createPaths();
+		const config: VoxSpellConfig = {
+			version: 1,
+			asr: {
+				activeProvider: 'tencent',
+				providers: [
+					{
+						id: 'tencent',
+						type: 'tencent-realtime',
+						engineModelType: '16k_zh',
+					},
+				],
+			},
+		};
+		await saveVoxSpellConfig(paths.directory, paths.configFile, config);
+		const manager = new DaemonConfigManager({ paths, environment: {} });
+		await manager.initialize();
+
+		await manager.updateCredentialEntries(
+			[{ name: 'TENCENT_CLOUD_ASR_APPID', value: '1000000000' }],
+			[],
+		);
+		expect(manager.getStatus()).toMatchObject({
+			state: 'degraded',
+			missingCredentialNames: ['TENCENT_CLOUD_ASR_SECRET_ID', 'TENCENT_CLOUD_ASR_SECRET_KEY'],
+		});
+
+		await manager.updateCredentialEntries(
+			[
+				{ name: 'TENCENT_CLOUD_ASR_SECRET_ID', value: 'secret-id' },
+				{ name: 'TENCENT_CLOUD_ASR_SECRET_KEY', value: 'secret-key' },
+			],
+			[],
+		);
+		expect(manager.getStatus()).toMatchObject({
+			state: 'ready',
+			missingCredentialNames: [],
+		});
+		expect(manager.getAsrProvider()?.id).toBe('tencent');
 	});
 
 	it('does not overwrite an existing invalid config during startup', async () => {

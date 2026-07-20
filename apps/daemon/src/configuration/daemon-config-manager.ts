@@ -59,11 +59,6 @@ export interface DaemonConfigManagerOptions {
 	) => TextPolisher | undefined;
 }
 
-interface RuntimeProviderSnapshot {
-	readonly asrProvider: RealtimeAsrProvider;
-	readonly textPolisher?: TextPolisher;
-}
-
 /** 串行管理 daemon 配置、凭据和当前运行时 Provider。 */
 export class DaemonConfigManager {
 	readonly #paths: VoxSpellConfigPaths;
@@ -114,48 +109,39 @@ export class DaemonConfigManager {
 		}
 	}
 
-	/** 从磁盘重载配置和凭据，并仅在全部成功后替换运行时快照。 */
+	/** 从磁盘重载配置和凭据；运行时不可用时进入 degraded。 */
 	async reload(): Promise<void> {
 		await this.#enqueue(async () => {
-			let loadedConfig: VoxSpellConfig | undefined;
-			let loadedCredentials: VoxSpellCredentials | undefined;
 			try {
-				loadedConfig = await loadVoxSpellConfig(this.#paths.configFile);
-				loadedCredentials = await loadVoxSpellCredentials(this.#paths.credentialsFile);
-				const providers = this.#createCandidateProviders(loadedConfig, loadedCredentials);
-				this.#apply(loadedConfig, loadedCredentials, providers);
+				const loadedConfig = await loadVoxSpellConfig(this.#paths.configFile);
+				const loadedCredentials = await loadVoxSpellCredentials(
+					this.#paths.credentialsFile,
+				);
+				this.#applyConfiguration(loadedConfig, loadedCredentials);
 			} catch (error) {
-				if (!this.#asrProvider && loadedConfig) {
-					this.#config = structuredClone(loadedConfig);
-					if (loadedCredentials) {
-						this.#credentials = structuredClone(loadedCredentials);
-					}
-				}
 				this.#recordFailure(error);
 				throw error;
 			}
 		});
 	}
 
-	/** 校验候选配置和当前凭据，但不保存或切换运行时。 */
+	/** 校验候选配置是否可以安全存储，不要求当前 Provider 已可运行。 */
 	async validate(config: VoxSpellConfig): Promise<void> {
 		await this.#enqueue(async () => {
-			const validatedConfig = parseVoxSpellConfig(config);
-			this.#createCandidateProviders(validatedConfig, this.#credentials);
+			parseVoxSpellConfig(config);
 		});
 	}
 
-	/** 原子保存候选配置，并在成功后切换运行时 Provider。 */
+	/** 保存候选配置；Provider 尚不可运行时保留配置并进入 degraded。 */
 	async updateConfig(config: VoxSpellConfig): Promise<void> {
 		await this.#enqueue(async () => {
 			const validatedConfig = parseVoxSpellConfig(config);
-			const providers = this.#createCandidateProviders(validatedConfig, this.#credentials);
 			await saveVoxSpellConfig(
 				path.dirname(this.#paths.configFile),
 				this.#paths.configFile,
 				validatedConfig,
 			);
-			this.#apply(validatedConfig, this.#credentials, providers);
+			this.#applyConfiguration(validatedConfig, this.#credentials);
 		});
 	}
 
@@ -240,11 +226,21 @@ export class DaemonConfigManager {
 		let missingCredentialNames: string[] = [];
 		if (this.#config) {
 			const effectiveEnvironment = this.#createEffectiveEnvironment(this.#credentials);
-			const asrCredentialNames = getAsrProviderCredentialNames(
-				this.#config,
-				this.#environment.VOXSPELL_ASR_PROVIDER,
-			);
-			const textPolisherCredentialNames = getTextPolisherCredentialNames(this.#config);
+			let asrCredentialNames: readonly string[] = [];
+			let textPolisherCredentialNames: readonly string[] = [];
+			try {
+				asrCredentialNames = getAsrProviderCredentialNames(
+					this.#config,
+					this.#environment.VOXSPELL_ASR_PROVIDER,
+				);
+			} catch {
+				asrCredentialNames = [];
+			}
+			try {
+				textPolisherCredentialNames = getTextPolisherCredentialNames(this.#config);
+			} catch {
+				textPolisherCredentialNames = [];
+			}
 			missingCredentialNames = [
 				...new Set([...asrCredentialNames, ...textPolisherCredentialNames]),
 			]
@@ -273,50 +269,48 @@ export class DaemonConfigManager {
 		);
 	}
 
-	#createCandidateProviders(
-		config: VoxSpellConfig,
-		credentials: VoxSpellCredentials,
-	): RuntimeProviderSnapshot {
-		const environment = this.#createEffectiveEnvironment(credentials);
-		return {
-			asrProvider: this.#createProvider(config, environment),
-			textPolisher: this.#createTextPolisher(config, environment),
-		};
-	}
-
 	async #saveAndApplyCredentials(credentials: VoxSpellCredentials): Promise<void> {
-		let providers: Partial<RuntimeProviderSnapshot> = {
-			asrProvider: this.#asrProvider,
-			textPolisher: this.#textPolisher,
-		};
-		if (this.#config) {
-			providers = this.#createCandidateProviders(this.#config, credentials);
-		}
 		await saveVoxSpellCredentials(
 			this.#paths.directory,
 			this.#paths.credentialsFile,
 			credentials,
 		);
+		if (this.#config) {
+			this.#applyConfiguration(this.#config, credentials);
+			return;
+		}
 		this.#credentials = structuredClone(credentials);
-		this.#asrProvider = providers.asrProvider;
-		this.#textPolisher = providers.textPolisher;
-		this.#lastError = undefined;
-		if (this.#config && providers.asrProvider) this.#state = 'ready';
 	}
 
 	#createEffectiveEnvironment(credentials: VoxSpellCredentials): NodeJS.ProcessEnv {
 		return { ...credentials.values, ...this.#environment };
 	}
 
-	#apply(
-		config: VoxSpellConfig,
-		credentials: VoxSpellCredentials,
-		providers: RuntimeProviderSnapshot,
-	): void {
+	#applyConfiguration(config: VoxSpellConfig, credentials: VoxSpellCredentials): void {
 		this.#config = structuredClone(config);
 		this.#credentials = structuredClone(credentials);
-		this.#asrProvider = providers.asrProvider;
-		this.#textPolisher = providers.textPolisher;
+		const environment = this.#createEffectiveEnvironment(credentials);
+		let runtimeError: unknown;
+		try {
+			this.#asrProvider = this.#createProvider(config, environment);
+		} catch (error) {
+			this.#asrProvider = undefined;
+			runtimeError = error;
+		}
+		try {
+			this.#textPolisher = this.#createTextPolisher(config, environment);
+		} catch (error) {
+			this.#textPolisher = undefined;
+			runtimeError ??= error;
+		}
+		if (runtimeError) {
+			this.#state = 'degraded';
+			this.#lastError =
+				runtimeError instanceof Error
+					? runtimeError.message
+					: 'Unknown configuration error';
+			return;
+		}
 		this.#state = 'ready';
 		this.#lastError = undefined;
 	}

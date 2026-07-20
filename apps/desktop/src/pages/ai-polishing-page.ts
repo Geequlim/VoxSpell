@@ -82,10 +82,11 @@ class AiPolishingPageView {
 	readonly resetPromptButton: InstanceType<typeof Gtk.Button>;
 	@bind.prop('subtitle', (state) => state.operationDescription)
 	@bind.prop('title', (state) => state.operationTitle)
-	@bind.visible((state) => Boolean(state.operationDescription))
 	readonly operationRow: InstanceType<typeof Adw.ActionRow>;
 	@bind.visible((state) => state.phase === 'error')
 	readonly operationErrorIcon: InstanceType<typeof Gtk.Image>;
+	@bind.visible((state) => Boolean(state.operationDescription))
+	readonly actionGroup: InstanceType<typeof Adw.PreferencesGroup>;
 
 	constructor(
 		root: InstanceType<typeof Adw.PreferencesPage>,
@@ -102,6 +103,7 @@ class AiPolishingPageView {
 		resetPromptButton: InstanceType<typeof Gtk.Button>,
 		operationRow: InstanceType<typeof Adw.ActionRow>,
 		operationErrorIcon: InstanceType<typeof Gtk.Image>,
+		actionGroup: InstanceType<typeof Adw.PreferencesGroup>,
 	) {
 		this.root = root;
 		this.enabledRow = enabledRow;
@@ -117,6 +119,7 @@ class AiPolishingPageView {
 		this.resetPromptButton = resetPromptButton;
 		this.operationRow = operationRow;
 		this.operationErrorIcon = operationErrorIcon;
+		this.actionGroup = actionGroup;
 	}
 }
 
@@ -231,6 +234,7 @@ export function createAiPolishingPage(
 		resetPromptButton,
 		operationRow,
 		operationErrorIcon,
+		actionGroup,
 	);
 	view.state = state;
 	return root;

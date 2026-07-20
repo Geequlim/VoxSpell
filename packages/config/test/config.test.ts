@@ -94,6 +94,27 @@ describe('VoxSpell config', () => {
 		expect(() => resolveAsrProvider(config, {})).toThrow(AsrProviderConfigError);
 	});
 
+	it('stores an incomplete provider but rejects it at the runtime boundary', () => {
+		const config = parseVoxSpellConfig({
+			version: 1,
+			asr: {
+				activeProvider: 'incomplete',
+				providers: [
+					{
+						id: 'incomplete',
+						type: 'openai-compatible-transcription',
+						baseUrl: '',
+						apiKeyEnvironment: '',
+						model: '',
+					},
+				],
+			},
+		});
+
+		expect(config.asr.activeProvider).toBe('incomplete');
+		expect(() => resolveAsrProvider(config, {})).toThrow(AsrProviderConfigError);
+	});
+
 	it('resolves Tencent realtime credentials from the fixed environment variables', () => {
 		const config = parseVoxSpellConfig({
 			version: 1,

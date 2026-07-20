@@ -6,6 +6,7 @@
 	"sideEffects": false,
 	"exports": {
 		"./atomic-write": "./src/atomic-write.ts",
+		"./asr-provider-definition": "./src/asr-provider-definition.ts",
 		"./asr-provider": "./src/asr-provider.ts",
 		"./config-paths": "./src/config-paths.ts",
 		"./config-schema": "./src/config-schema.ts",

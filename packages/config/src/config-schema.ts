@@ -10,9 +10,9 @@ export const OpenAiCompatibleTranscriptionProviderConfigSchema = Type.Object(
 	{
 		id: Type.String({ minLength: 1 }),
 		type: Type.Literal('openai-compatible-transcription'),
-		baseUrl: Type.String({ pattern: '^https?://', minLength: 1 }),
-		apiKeyEnvironment: Type.String({ pattern: '^[A-Z][A-Z0-9_]*$' }),
-		model: Type.String({ minLength: 1 }),
+		baseUrl: Type.String(),
+		apiKeyEnvironment: Type.String(),
+		model: Type.String(),
 	},
 	{ additionalProperties: false },
 );
@@ -25,7 +25,7 @@ export const TencentRealtimeProviderConfigSchema = Type.Object(
 	{
 		id: Type.String({ minLength: 1 }),
 		type: Type.Literal('tencent-realtime'),
-		engineModelType: Type.String({ minLength: 1 }),
+		engineModelType: Type.String(),
 	},
 	{ additionalProperties: false },
 );

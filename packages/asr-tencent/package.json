@@ -5,12 +5,14 @@
 	"type": "module",
 	"sideEffects": false,
 	"exports": {
+		"./provider-definition": "./src/provider-definition.ts",
 		"./tencent-asr-provider": "./src/tencent-asr-provider.ts",
 		"./tencent-signature": "./src/tencent-signature.ts"
 	},
 	"dependencies": {
 		"@sinclair/typebox": "0.34.52",
 		"@voxspell/asr-core": "workspace:^",
+		"@voxspell/config": "workspace:^",
 		"ws": "8.21.1"
 	},
 	"devDependencies": {

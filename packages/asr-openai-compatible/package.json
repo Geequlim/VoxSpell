@@ -6,11 +6,13 @@
 	"sideEffects": false,
 	"exports": {
 		"./openai-compatible-asr-provider": "./src/openai-compatible-asr-provider.ts",
-		"./pcm-wave": "./src/pcm-wave.ts"
+		"./pcm-wave": "./src/pcm-wave.ts",
+		"./provider-definition": "./src/provider-definition.ts"
 	},
 	"dependencies": {
 		"@sinclair/typebox": "0.34.52",
 		"@voxspell/asr-core": "workspace:^",
+		"@voxspell/config": "workspace:^",
 		"openai": "6.47.0"
 	},
 	"devDependencies": {

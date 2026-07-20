@@ -97,14 +97,13 @@ describe('ConfigState', () => {
 	it('loads, edits and automatically saves configuration and credentials in order', async () => {
 		const state = createTestState();
 		await vi.waitFor(() => expect(state.config.draft).toBeDefined());
-		expect(state.config.model).toBe('old-model');
+		expect(state.config.activeProvider).toMatchObject({ model: 'old-model' });
 		expect(state.config.providerDisplayNames).toEqual(['OpenRouter']);
-		expect(state.config.selectedCredentialName).toBe('OPENROUTER_API_KEY');
-		expect(state.config.selectedCredentialStatus).toBe('由 daemon 运行环境提供');
+		expect(state.config.requiredCredentialNames).toEqual(['OPENROUTER_API_KEY']);
 
-		state.config.updateModel('new-model');
+		state.config.updateProviderField('model', 'new-model');
 		state.config.updateTrimTrailingPeriod(true);
-		state.config.updateSelectedCredential('new-secret');
+		state.config.updateCredential('OPENROUTER_API_KEY', 'new-secret');
 		expect(state.config.isDirty).toBe(true);
 		await state.config.flushPendingChanges();
 
@@ -130,7 +129,7 @@ describe('ConfigState', () => {
 		);
 		expect(state.config.phase).toBe('saved');
 		expect(state.config.isDirty).toBe(false);
-		expect(state.config.selectedCredentialValue).toBe('');
+		expect(state.config.getCredentialValue('OPENROUTER_API_KEY')).toBe('');
 		disposeTestState(state);
 	});
 
@@ -199,19 +198,24 @@ describe('ConfigState', () => {
 		disposeTestState(state);
 	});
 
-	it('rejects invalid form fields before calling daemon validation', async () => {
+	it('saves incomplete provider fields instead of blocking the selected service', async () => {
 		const state = createTestState();
 		await vi.waitFor(() => expect(state.config.draft).toBeDefined());
-		state.config.updateBaseUrl('not-a-url');
+		state.config.updateProviderField('baseUrl', '');
+		state.config.updateProviderField('model', '');
 
 		await state.config.flushPendingChanges();
 
-		expect(state.config.phase).toBe('error');
-		expect(state.config.fieldErrors.baseUrl).toContain('HTTP');
-		expect(state.config.operationTitle).toBe('配置有 1 项需要修正');
-		expect(state.config.operationDescription).toContain('语音识别 API 地址');
-		expect(state.client.validateConfig).not.toHaveBeenCalled();
-		expect(state.client.updateConfig).not.toHaveBeenCalled();
+		expect(state.client.validateConfig).toHaveBeenCalled();
+		expect(state.client.updateConfig).toHaveBeenCalledWith(
+			expect.objectContaining({
+				asr: expect.objectContaining({
+					activeProvider: 'openrouter',
+					providers: [expect.objectContaining({ baseUrl: '', model: '' })],
+				}),
+			}),
+		);
+		expect(state.config.phase).toBe('saved');
 		disposeTestState(state);
 	});
 
@@ -251,34 +255,30 @@ describe('ConfigState', () => {
 		disposeTestState(state);
 	});
 
-	it('creates complete OpenAI providers with optional stored credentials', async () => {
+	it('creates and selects an OpenAI provider without requiring credentials', async () => {
 		const state = createTestState();
 		await vi.waitFor(() => expect(state.config.draft).toBeDefined());
 
 		await expect(
-			state.config.createProvider(
-				{
-					id: 'backup',
-					type: 'openai-compatible-transcription',
-					baseUrl: 'https://api.example.com/v1',
-					apiKeyEnvironment: 'BACKUP_API_KEY',
-					model: 'whisper-large',
-				},
-				[{ name: 'BACKUP_API_KEY', value: 'backup-secret' }],
-			),
+			state.config.createProvider({
+				id: 'backup',
+				type: 'openai-compatible-transcription',
+				baseUrl: 'https://api.example.com/v1',
+				apiKeyEnvironment: 'OPENAI_API_KEY',
+				model: 'whisper-large',
+			}),
 		).resolves.toBe(true);
 
 		expect(state.config.activeProvider).toMatchObject({
 			id: 'backup',
 			type: 'openai-compatible-transcription',
 			baseUrl: 'https://api.example.com/v1',
-			apiKeyEnvironment: 'BACKUP_API_KEY',
+			apiKeyEnvironment: 'OPENAI_API_KEY',
 			model: 'whisper-large',
 		});
-		expect(state.client.updateCredentials).toHaveBeenCalledWith({
-			set: [{ name: 'BACKUP_API_KEY', value: 'backup-secret' }],
-			delete: [],
-		});
+		expect(state.client.updateCredentials).not.toHaveBeenCalled();
+		expect(state.client.config?.asr.activeProvider).toBe('backup');
+		expect(state.config.requiredCredentialNames).toEqual(['OPENAI_API_KEY']);
 		expect(state.config.selectedProviderIndex).toBe(1);
 		expect(state.config.canDeleteProvider).toBe(true);
 		disposeTestState(state);
@@ -289,14 +289,11 @@ describe('ConfigState', () => {
 		await vi.waitFor(() => expect(state.config.draft).toBeDefined());
 
 		await expect(
-			state.config.createProvider(
-				{
-					id: 'realtime',
-					type: 'tencent-realtime',
-					engineModelType: '16k_zh',
-				},
-				[],
-			),
+			state.config.createProvider({
+				id: 'realtime',
+				type: 'tencent-realtime',
+				engineModelType: '16k_zh',
+			}),
 		).resolves.toBe(true);
 
 		expect(state.config.activeProviderSupportsRealtime).toBe(true);
@@ -304,6 +301,34 @@ describe('ConfigState', () => {
 		state.config.deleteActiveProvider();
 		expect(state.config.providerIds).toEqual(['openrouter']);
 		expect(state.config.selectedProviderIndex).toBe(0);
+		disposeTestState(state);
+	});
+
+	it('updates every Tencent credential independently by name', async () => {
+		const state = createTestState();
+		await vi.waitFor(() => expect(state.config.draft).toBeDefined());
+		await state.config.createProvider({
+			id: 'realtime',
+			type: 'tencent-realtime',
+			engineModelType: '16k_zh',
+		});
+		const credentialNames = [
+			'TENCENT_CLOUD_ASR_APPID',
+			'TENCENT_CLOUD_ASR_SECRET_ID',
+			'TENCENT_CLOUD_ASR_SECRET_KEY',
+		];
+		expect(state.config.requiredCredentialNames).toEqual(credentialNames);
+
+		credentialNames.forEach((name, index) => {
+			state.config.updateCredential(name, `secret-${index}`);
+			state.config.commitCredential(name);
+		});
+		await state.config.flushPendingChanges();
+
+		expect(state.client.updateCredentials).toHaveBeenCalledWith({
+			set: credentialNames.map((name, index) => ({ name, value: `secret-${index}` })),
+			delete: [],
+		});
 		disposeTestState(state);
 	});
 
@@ -325,16 +350,13 @@ describe('ConfigState', () => {
 	it('keeps an inline identifier editable while reporting duplicates', async () => {
 		const state = createTestState();
 		await vi.waitFor(() => expect(state.config.draft).toBeDefined());
-		await state.config.createProvider(
-			{
-				id: 'backup',
-				type: 'openai-compatible-transcription',
-				baseUrl: 'https://api.example.com/v1',
-				apiKeyEnvironment: 'BACKUP_API_KEY',
-				model: 'whisper-large',
-			},
-			[],
-		);
+		await state.config.createProvider({
+			id: 'backup',
+			type: 'openai-compatible-transcription',
+			baseUrl: 'https://api.example.com/v1',
+			apiKeyEnvironment: 'BACKUP_API_KEY',
+			model: 'whisper-large',
+		});
 		state.config.selectProvider(0);
 		state.client.updateConfig.mockClear();
 
@@ -348,18 +370,10 @@ describe('ConfigState', () => {
 		disposeTestState(state);
 	});
 
-	it('deletes stored credentials and tests only a saved provider', async () => {
+	it('tests only a saved provider', async () => {
 		const state = createTestState();
-		state.client.storedNames = ['OPENROUTER_API_KEY'];
-		await vi.waitFor(() => expect(state.config.selectedCredentialName).toBeDefined());
-		await state.config.load();
+		await vi.waitFor(() => expect(state.config.draft).toBeDefined());
 
-		expect(state.config.canDeleteCredential).toBe(true);
-		await state.config.deleteSelectedCredential();
-		expect(state.client.updateCredentials).toHaveBeenCalledWith({
-			set: [],
-			delete: ['OPENROUTER_API_KEY'],
-		});
 		await state.config.testProvider();
 		expect(state.client.testProvider).toHaveBeenCalledWith('openrouter');
 		expect(state.config.operationDescription).toContain('12 ms');

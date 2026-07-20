@@ -1,4 +1,3 @@
-import { getAsrProviderCredentialNames } from '@voxspell/config/asr-provider';
 import {
 	DEFAULT_MAXIMUM_RECORDING_SECONDS,
 	MAXIMUM_RECORDING_SECONDS,
@@ -10,7 +9,13 @@ import { ResponseError } from 'vscode-jsonrpc';
 
 import { action, derived, disposeState, effect, state, value } from './index';
 import { getProviderDisplayName } from '../provider-display';
+import { getAsrProviderDefinition } from '../asr-provider-registry';
 
+import type {
+	AsrProviderCredentialDefinition,
+	AsrProviderDefinition,
+	AsrProviderFieldDefinition,
+} from '@voxspell/config/asr-provider-definition';
 import type { AsrProviderConfig, VoxSpellConfig } from '@voxspell/config/config-schema';
 import type {
 	CredentialsGetStatusResult,
@@ -38,7 +43,6 @@ export class ConfigState {
 	@value draft?: VoxSpellConfig;
 	@value storedCredentialNames: readonly string[] = [];
 	@value pendingCredentialValues: Record<string, string> = {};
-	@value selectedCredentialName?: string;
 	@value phase: ConfigOperationPhase = 'idle';
 	@value errorMessage?: string;
 	@value fieldErrors: Record<string, string> = {};
@@ -72,12 +76,13 @@ export class ConfigState {
 		return this.draft?.asr.providers[this.selectedProviderIndex];
 	}
 
+	@derived get activeProviderDefinition(): AsrProviderDefinition | undefined {
+		if (!this.activeProvider) return undefined;
+		return getAsrProviderDefinition(this.activeProvider);
+	}
+
 	@derived get providerTypeTitle(): string {
-		if (this.activeProvider?.type === 'openai-compatible-transcription') {
-			return 'OpenAI 兼容转写接口';
-		}
-		if (this.activeProvider?.type === 'tencent-realtime') return '腾讯云实时语音识别';
-		return '';
+		return this.activeProviderDefinition?.title ?? '';
 	}
 
 	@derived get providerId(): string {
@@ -89,42 +94,27 @@ export class ConfigState {
 	}
 
 	@derived get activeProviderSupportsRealtime(): boolean {
-		return this.activeProvider?.type === 'tencent-realtime';
+		return this.activeProviderDefinition?.supportsRealtime ?? false;
 	}
 
-	@derived get baseUrl(): string {
+	@derived get providerFields(): readonly AsrProviderFieldDefinition[] {
+		return this.activeProviderDefinition?.fields ?? [];
+	}
+
+	@derived get activeCredentialDefinitions(): readonly AsrProviderCredentialDefinition[] {
 		const provider = this.activeProvider;
-		return provider?.type === 'openai-compatible-transcription' ? provider.baseUrl : '';
-	}
-
-	@derived get model(): string {
-		const provider = this.activeProvider;
-		return provider?.type === 'openai-compatible-transcription' ? provider.model : '';
-	}
-
-	@derived get apiKeyEnvironment(): string {
-		const provider = this.activeProvider;
-		return provider?.type === 'openai-compatible-transcription'
-			? provider.apiKeyEnvironment
-			: '';
-	}
-
-	@derived get engineModelType(): string {
-		const provider = this.activeProvider;
-		return provider?.type === 'tencent-realtime' ? provider.engineModelType : '';
-	}
-
-	@derived get showsOpenAiFields(): boolean {
-		return this.activeProvider?.type === 'openai-compatible-transcription';
-	}
-
-	@derived get showsTencentFields(): boolean {
-		return this.activeProvider?.type === 'tencent-realtime';
+		if (!provider) return [];
+		return (
+			this.activeProviderDefinition?.credentials.filter(
+				(item) => item.getEnvironmentName(provider).trim().length > 0,
+			) ?? []
+		);
 	}
 
 	@derived get requiredCredentialNames(): readonly string[] {
-		if (!this.draft) return [];
-		return getAsrProviderCredentialNames(this.draft);
+		const provider = this.activeProvider;
+		if (!provider) return [];
+		return this.activeCredentialDefinitions.map((item) => item.getEnvironmentName(provider));
 	}
 
 	@derived get polishingEnabled(): boolean {
@@ -180,33 +170,9 @@ export class ConfigState {
 		return '尚未存入应用凭据库';
 	}
 
-	@derived get selectedCredentialIndex(): number {
-		const index = this.requiredCredentialNames.findIndex(
-			(name) => name === this.selectedCredentialName,
-		);
-		return Math.max(index, 0);
-	}
-
-	@derived get selectedCredentialValue(): string {
-		if (!this.selectedCredentialName) return '';
-		return this.pendingCredentialValues[this.selectedCredentialName] ?? '';
-	}
-
-	@derived get selectedCredentialStatus(): string {
-		const name = this.selectedCredentialName;
-		if (!name) return '当前识别服务不需要凭据';
-		if (this.pendingCredentialValues[name]) return '已输入新值，完成输入后自动保存';
-		if (this.storedCredentialNames.includes(name)) return '已安全存储';
-		const activeProviderId = this.draft?.asr.activeProvider;
-		const status = this.$daemon.status;
-		if (
-			status &&
-			status.activeProvider === activeProviderId &&
-			!status.missingCredentialNames.includes(name)
-		) {
-			return '由 daemon 运行环境提供';
-		}
-		return '尚未存入应用凭据库';
+	/** 返回指定识别凭据尚未保存的输入值。 */
+	getCredentialValue(name: string): string {
+		return this.pendingCredentialValues[name] ?? '';
 	}
 
 	@derived get isDirty(): boolean {
@@ -226,11 +192,6 @@ export class ConfigState {
 
 	@derived get canDeleteProvider(): boolean {
 		return this.isEditable && this.providerIds.length > 1;
-	}
-
-	@derived get canDeleteCredential(): boolean {
-		const name = this.selectedCredentialName;
-		return this.isEditable && Boolean(name && this.storedCredentialNames.includes(name));
 	}
 
 	@derived get canTestProvider(): boolean {
@@ -307,7 +268,6 @@ export class ConfigState {
 		if (!this.draft || !provider) return;
 		this.selectedProviderIndex = index;
 		this.draft.asr.activeProvider = provider.id;
-		this.selectFirstCredential();
 		this.scheduleAutoSave();
 	}
 
@@ -320,56 +280,27 @@ export class ConfigState {
 		this.scheduleAutoSave(500);
 	}
 
-	/** 选择当前准备更新的凭据名称。 */
-	@action selectCredential(index: number): void {
-		this.selectedCredentialName = this.requiredCredentialNames[index];
-	}
-
-	/** 更新当前凭据的内存草稿，绝不回填已存储值。 */
-	@action updateSelectedCredential(value: string): void {
-		if (!this.selectedCredentialName) return;
-		this.pendingCredentialValues[this.selectedCredentialName] = value;
+	/** 更新指定凭据的内存草稿，绝不回填已存储值。 */
+	@action updateCredential(name: string, value: string): void {
+		if (!this.requiredCredentialNames.includes(name)) return;
+		this.pendingCredentialValues[name] = value;
 		this.clearOperationResult();
 	}
 
-	/** 将当前识别服务凭据标记为输入完成并立即自动保存。 */
+	/** 将指定识别凭据标记为输入完成并立即自动保存。 */
 	@action
-	commitSelectedCredential(): void {
-		if (!this.selectedCredentialName || !this.selectedCredentialValue) return;
-		this.$credentialNamesReadyToSave.add(this.selectedCredentialName);
+	commitCredential(name: string): void {
+		if (!this.requiredCredentialNames.includes(name) || !this.getCredentialValue(name)) return;
+		this.$credentialNamesReadyToSave.add(name);
 		this.scheduleAutoSave();
 	}
 
-	/** 更新当前 OpenAI 兼容 Provider 的 API 地址。 */
-	@action updateBaseUrl(value: string): void {
+	/** 更新当前 Provider 实现公开的配置字段。 */
+	@action updateProviderField(fieldId: string, value: string): void {
 		const provider = this.activeProvider;
-		if (provider?.type !== 'openai-compatible-transcription') return;
-		provider.baseUrl = value;
-		this.scheduleAutoSave(500);
-	}
-
-	/** 更新当前 OpenAI 兼容 Provider 的模型名称。 */
-	@action updateModel(value: string): void {
-		const provider = this.activeProvider;
-		if (provider?.type !== 'openai-compatible-transcription') return;
-		provider.model = value;
-		this.scheduleAutoSave(500);
-	}
-
-	/** 更新当前 OpenAI 兼容 Provider 的凭据名称。 */
-	@action updateApiKeyEnvironment(value: string): void {
-		const provider = this.activeProvider;
-		if (provider?.type !== 'openai-compatible-transcription') return;
-		provider.apiKeyEnvironment = value;
-		this.selectFirstCredential();
-		this.scheduleAutoSave(500);
-	}
-
-	/** 更新当前腾讯实时 Provider 的引擎模型。 */
-	@action updateEngineModelType(value: string): void {
-		const provider = this.activeProvider;
-		if (provider?.type !== 'tencent-realtime') return;
-		provider.engineModelType = value;
+		const field = this.providerFields.find((item) => item.id === fieldId);
+		if (!provider || !field) return;
+		field.setValue(provider, value);
 		this.scheduleAutoSave(500);
 	}
 
@@ -448,11 +379,8 @@ export class ConfigState {
 		this.scheduleAutoSave();
 	}
 
-	/** 校验并保存一份完整的新 Provider 与用户主动填写的凭据。 */
-	async createProvider(
-		provider: AsrProviderConfig,
-		credentialEntries: readonly CredentialsUpdateParams['set'][number][],
-	): Promise<boolean> {
+	/** 创建并选中一份 Provider 默认配置，不要求它已经具备运行条件。 */
+	async createProvider(provider: AsrProviderConfig): Promise<boolean> {
 		if (!this.draft || !this.isEditable) return false;
 		await this.flushPendingChanges();
 		if (!this.draft || this.phase === 'error') return false;
@@ -473,12 +401,9 @@ export class ConfigState {
 		this.errorMessage = undefined;
 		this.fieldErrors = {};
 		try {
-			if (credentialEntries.length > 0) {
-				await this.$client.updateCredentials({ set: [...credentialEntries], delete: [] });
-			}
 			await this.$client.validateConfig(candidate);
 			await this.$client.updateConfig(candidate);
-			this.applyCreatedProvider(candidate, selectedProviderIndex, credentialEntries);
+			this.applyCreatedProvider(candidate, selectedProviderIndex);
 			await this.$daemon.refresh();
 			return true;
 		} catch (error) {
@@ -501,23 +426,7 @@ export class ConfigState {
 			delete this.pendingCredentialValues[name];
 			this.$credentialNamesReadyToSave.delete(name);
 		});
-		this.selectFirstCredential();
 		this.scheduleAutoSave();
-	}
-
-	/** 删除当前凭据在应用私有凭据库中的值。 */
-	@action async deleteSelectedCredential(): Promise<void> {
-		const name = this.selectedCredentialName;
-		if (!name || !this.canDeleteCredential) return;
-		this.phase = 'saving';
-		this.errorMessage = undefined;
-		try {
-			await this.$client.updateCredentials({ set: [], delete: [name] });
-			this.applyDeletedCredential(name);
-			await this.$daemon.refresh();
-		} catch (error) {
-			this.applyOperationError(error);
-		}
 	}
 
 	/** 测试当前已保存 Provider 的连接、模型和鉴权。 */
@@ -647,15 +556,6 @@ export class ConfigState {
 		this.errorMessage = undefined;
 		this.fieldErrors = {};
 		this.$loaded = true;
-		this.selectFirstCredential();
-	}
-
-	@action private applyDeletedCredential(name: string): void {
-		this.storedCredentialNames = this.storedCredentialNames.filter((item) => item !== name);
-		delete this.pendingCredentialValues[name];
-		this.$credentialNamesReadyToSave.delete(name);
-		this.phase = 'saved';
-		this.errorMessage = undefined;
 	}
 
 	@action private applyProviderTestResult(result: ProviderTestResult): void {
@@ -691,12 +591,10 @@ export class ConfigState {
 	@action private applyCreatedProvider(
 		config: VoxSpellConfig,
 		selectedProviderIndex: number,
-		credentialEntries: readonly CredentialsUpdateParams['set'][number][],
 	): void {
 		this.selectedProviderIndex = selectedProviderIndex;
 		this.draft = structuredClone(config);
-		this.applyAutoSaved(config, credentialEntries);
-		this.selectFirstCredential();
+		this.applyAutoSaved(config, []);
 	}
 
 	@action private applyValidationErrors(fieldErrors: Record<string, string>): void {
@@ -708,10 +606,6 @@ export class ConfigState {
 	@action private applyOperationError(error: unknown): void {
 		this.phase = 'error';
 		this.errorMessage = describeConfigError(error);
-	}
-
-	private selectFirstCredential(): void {
-		this.selectedCredentialName = this.requiredCredentialNames[0];
 	}
 
 	/** 清除当前表单操作结果，供已关闭的临时编辑界面恢复主页面状态。 */
@@ -774,17 +668,6 @@ function validateConfigCandidate(
 	const provider = candidate.asr.providers[selectedProviderIndex];
 	if (!provider) {
 		fieldErrors.provider = '请选择有效的识别服务。';
-	} else if (provider.type === 'openai-compatible-transcription') {
-		provider.baseUrl = provider.baseUrl.trim();
-		provider.model = provider.model.trim();
-		if (!/^https?:\/\//.test(provider.baseUrl)) fieldErrors.baseUrl = '请输入 HTTP(S) 地址。';
-		if (!provider.model) fieldErrors.model = '请输入模型名称。';
-		if (!/^[A-Z][A-Z0-9_]*$/.test(provider.apiKeyEnvironment)) {
-			fieldErrors.apiKeyEnvironment = '凭据名称必须使用大写字母、数字和下划线。';
-		}
-	} else {
-		provider.engineModelType = provider.engineModelType.trim();
-		if (!provider.engineModelType) fieldErrors.engineModelType = '请输入引擎模型。';
 	}
 	const polishing = candidate.polishing;
 	if (polishing) {

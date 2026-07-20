@@ -4,6 +4,8 @@
 	"private": true,
 	"type": "module",
 	"dependencies": {
+		"@voxspell/asr-openai-compatible": "workspace:^",
+		"@voxspell/asr-tencent": "workspace:^",
 		"@voxspell/config": "workspace:^",
 		"@voxspell/protocol": "workspace:^",
 		"mobx": "6.16.1",
