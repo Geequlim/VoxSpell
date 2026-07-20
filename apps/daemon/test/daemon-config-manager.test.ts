@@ -38,6 +38,7 @@ async function createPaths(): Promise<VoxSpellConfigPaths> {
 		configFile: path.join(directory, 'config.yaml'),
 		credentialsFile: path.join(directory, 'credentials.json'),
 		dictionaryFile: path.join(directory, 'dictionary.yaml'),
+		statusAnimationFile: path.join(directory, 'status-animation.json'),
 	};
 }
 

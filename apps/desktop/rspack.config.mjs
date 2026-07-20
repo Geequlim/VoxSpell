@@ -48,7 +48,16 @@ export default {
 	},
 	plugins: [
 		new CopyRspackPlugin({
-			patterns: [{ from: 'icons', to: 'icons' }],
+			patterns: [
+				{ from: 'icons', to: 'icons' },
+				{
+					from: path.join(
+						directory,
+						'../../native/fcitx5-addon/tools/status-animation-preview.html',
+					),
+					to: 'tools/status-animation-preview.html',
+				},
+			],
 		}),
 		new TsCheckerRspackPlugin({
 			typescript: {

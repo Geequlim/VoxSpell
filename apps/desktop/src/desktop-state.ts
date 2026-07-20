@@ -3,6 +3,7 @@ import { DaemonServiceState } from './state/daemon-service-state';
 import { ConfigState } from './state/config-state';
 import { InputBehaviorState } from './state/input-behavior-state';
 import { InputMethodDiagnosticsState } from './state/input-method-diagnostics-state';
+import { StatusAnimationState } from './state/status-animation-state';
 import { DictionaryState } from './state/dictionary-state';
 import { action, state, value } from './state/index';
 
@@ -13,6 +14,7 @@ import type { ConfigClient } from './state/config-state';
 import type { InputBehaviorClient } from './state/input-behavior-state';
 import type { InputMethodDiagnosticsClient } from './state/input-method-diagnostics-state';
 import type { DictionaryClient } from './state/dictionary-state';
+import type { StatusAnimationConfigClient } from './status-animation-config-client';
 
 export interface DesktopClient extends DaemonClient, ConfigClient, DictionaryClient {}
 
@@ -24,6 +26,7 @@ export class DesktopState {
 	readonly config: ConfigState;
 	readonly inputBehavior: InputBehaviorState;
 	readonly inputMethodDiagnostics: InputMethodDiagnosticsState;
+	readonly statusAnimation: StatusAnimationState;
 	readonly dictionary: DictionaryState;
 	@value currentPage: PageId = 'overview';
 
@@ -32,12 +35,14 @@ export class DesktopState {
 		daemonServiceClient: DaemonServiceClient,
 		inputBehaviorClient: InputBehaviorClient,
 		inputMethodDiagnosticsClient: InputMethodDiagnosticsClient,
+		statusAnimationClient: StatusAnimationConfigClient,
 	) {
 		this.daemon = new DaemonState(client);
 		this.daemonService = new DaemonServiceState(daemonServiceClient);
 		this.config = new ConfigState(client, this.daemon);
 		this.inputBehavior = new InputBehaviorState(inputBehaviorClient);
 		this.inputMethodDiagnostics = new InputMethodDiagnosticsState(inputMethodDiagnosticsClient);
+		this.statusAnimation = new StatusAnimationState(statusAnimationClient);
 		this.dictionary = new DictionaryState(client, this.daemon);
 	}
 
@@ -47,6 +52,7 @@ export class DesktopState {
 		this.daemonService.start();
 		this.inputBehavior.start();
 		this.inputMethodDiagnostics.start();
+		this.statusAnimation.start();
 	}
 
 	/** 同时刷新 daemon、服务与桌面端输入法诊断。 */
@@ -75,6 +81,7 @@ export class DesktopState {
 		await Promise.all([
 			this.config.flushPendingChanges(),
 			this.inputBehavior.flushPendingChanges(),
+			this.statusAnimation.flushPendingChanges(),
 		]);
 	}
 
@@ -83,6 +90,7 @@ export class DesktopState {
 		this.config.dispose();
 		this.inputBehavior.dispose();
 		this.inputMethodDiagnostics.dispose();
+		this.statusAnimation.dispose();
 		this.dictionary.dispose();
 		this.daemonService.dispose();
 		this.daemon.dispose();

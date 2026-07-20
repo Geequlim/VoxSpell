@@ -168,6 +168,7 @@ export function createAiPolishingPage(
 	const promptBuffer = new Gtk.TextBuffer();
 	const promptView = new Gtk.TextView({
 		buffer: promptBuffer,
+		cssClasses: ['inline'],
 		wrapMode: Gtk.WrapMode.WORD_CHAR,
 		topMargin: 12,
 		bottomMargin: 12,

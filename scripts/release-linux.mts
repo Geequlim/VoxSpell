@@ -267,6 +267,11 @@ async function stageReleaseFiles(): Promise<void> {
 		path.join(STAGING_DIRECTORY, 'usr/lib/voxspell/desktop/index.cjs'),
 	);
 	await cp(
+		path.join(ROOT_DIRECTORY, 'apps/desktop/dist/tools'),
+		path.join(STAGING_DIRECTORY, 'usr/lib/voxspell/desktop/tools'),
+		{ recursive: true },
+	);
+	await cp(
 		path.join(ROOT_DIRECTORY, 'apps/daemon/dist/index.cjs'),
 		path.join(STAGING_DIRECTORY, 'usr/lib/voxspell/daemon/index.cjs'),
 	);

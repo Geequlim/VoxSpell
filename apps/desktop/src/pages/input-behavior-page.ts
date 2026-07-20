@@ -4,8 +4,10 @@ import { gtk } from '../state/gtk';
 
 import type { InputBehaviorState } from '../state/input-behavior-state';
 import type { FcitxModifier } from '../fcitx/fcitx-key';
+import type { StatusAnimationState } from '../state/status-animation-state';
 
 const bind = gtk<InputBehaviorState, InputBehaviorPageView>();
+const bindStatusAnimation = gtk<StatusAnimationState, StatusAnimationView>();
 
 @bind.view
 class InputBehaviorPageView {
@@ -75,9 +77,65 @@ class InputBehaviorPageView {
 	}
 }
 
+@bindStatusAnimation.view
+class StatusAnimationView {
+	declare state?: StatusAnimationState;
+	private $updatingSource = false;
+
+	@bindStatusAnimation.disposeOnDestroy
+	readonly root: InstanceType<typeof Adw.PreferencesGroup>;
+	@bindStatusAnimation.sensitive((state) => state.phase !== 'loading')
+	@bindStatusAnimation.click((state) => state.openEditor())
+	readonly openEditorButton: InstanceType<typeof Gtk.Button>;
+	@bindStatusAnimation.sensitive(
+		(state) => state.hasCustomConfig && state.phase !== 'saving' && state.phase !== 'loading',
+	)
+	@bindStatusAnimation.click((state) => state.reset())
+	readonly resetButton: InstanceType<typeof Gtk.Button>;
+	@bindStatusAnimation.render<InstanceType<typeof Gtk.TextBuffer>>((state, buffer, self) => {
+		if (buffer.text === state.draft) return;
+		self.$updatingSource = true;
+		buffer.text = state.draft;
+		self.$updatingSource = false;
+	})
+	@bindStatusAnimation.listen<InstanceType<typeof Gtk.TextBuffer>>(
+		'changed',
+		(state, buffer, self) => {
+			if (!self.$updatingSource) state.updateDraft(buffer.text);
+		},
+	)
+	readonly sourceBuffer: InstanceType<typeof Gtk.TextBuffer>;
+	@bindStatusAnimation.sensitive((state) => state.isEditable)
+	readonly sourceView: InstanceType<typeof Gtk.TextView>;
+	@bindStatusAnimation.prop('subtitle', (state) => state.operationDescription)
+	@bindStatusAnimation.visible((state) => Boolean(state.operationDescription))
+	readonly operationRow: InstanceType<typeof Adw.ActionRow>;
+	@bindStatusAnimation.visible((state) => state.phase === 'error')
+	readonly operationErrorIcon: InstanceType<typeof Gtk.Image>;
+
+	constructor(
+		root: InstanceType<typeof Adw.PreferencesGroup>,
+		openEditorButton: InstanceType<typeof Gtk.Button>,
+		resetButton: InstanceType<typeof Gtk.Button>,
+		sourceBuffer: InstanceType<typeof Gtk.TextBuffer>,
+		sourceView: InstanceType<typeof Gtk.TextView>,
+		operationRow: InstanceType<typeof Adw.ActionRow>,
+		operationErrorIcon: InstanceType<typeof Gtk.Image>,
+	) {
+		this.root = root;
+		this.openEditorButton = openEditorButton;
+		this.resetButton = resetButton;
+		this.sourceBuffer = sourceBuffer;
+		this.sourceView = sourceView;
+		this.operationRow = operationRow;
+		this.operationErrorIcon = operationErrorIcon;
+	}
+}
+
 /** 创建 Fcitx 插件输入行为配置页面。 */
 export function createInputBehaviorPage(
 	state: InputBehaviorState,
+	statusAnimationState: StatusAnimationState,
 ): InstanceType<typeof Adw.PreferencesPage> {
 	const pttKeyRow = new Adw.ActionRow({ title: 'PTT 热键' });
 	const resetShortcutButton = new Gtk.Button({
@@ -144,14 +202,14 @@ export function createInputBehaviorPage(
 	resultGroup.add(autoSelectRow);
 
 	const operationRow = new Adw.ActionRow({ title: '自动保存', subtitle: '' });
-	const actionGroup = new Adw.PreferencesGroup();
-	actionGroup.add(operationRow);
+	resultGroup.add(operationRow);
+	const statusAnimationGroup = createStatusAnimationGroup(statusAnimationState);
 
 	const root = new Adw.PreferencesPage({ title: '输入行为' });
 	root.add(triggerGroup);
 	root.add(polishingGroup);
 	root.add(resultGroup);
-	root.add(actionGroup);
+	root.add(statusAnimationGroup);
 	const view = new InputBehaviorPageView(
 		root,
 		pttKeyRow,
@@ -166,6 +224,78 @@ export function createInputBehaviorPage(
 	);
 	view.state = state;
 	return root;
+}
+
+function createStatusAnimationGroup(
+	state: StatusAnimationState,
+): InstanceType<typeof Adw.PreferencesGroup> {
+	const openEditorButton = new Gtk.Button({
+		label: '打开动画编辑器',
+		valign: Gtk.Align.CENTER,
+		cssClasses: ['suggested-action'],
+	});
+	const resetButton = new Gtk.Button({
+		label: '恢复默认',
+		valign: Gtk.Align.CENTER,
+	});
+	const buttonBox = new Gtk.Box({
+		orientation: Gtk.Orientation.HORIZONTAL,
+		spacing: 8,
+	});
+	buttonBox.append(resetButton);
+	buttonBox.append(openEditorButton);
+	const editorRow = new Adw.ActionRow({
+		title: '动画配置编辑器',
+		subtitle: '在浏览器中调整并预览动画，然后复制全部配置粘贴到下方。',
+	});
+	editorRow.addSuffix(buttonBox);
+
+	const sourceBuffer = new Gtk.TextBuffer();
+	const sourceView = new Gtk.TextView({
+		buffer: sourceBuffer,
+		monospace: true,
+		wrapMode: Gtk.WrapMode.NONE,
+		topMargin: 12,
+		bottomMargin: 12,
+		leftMargin: 12,
+		rightMargin: 12,
+	});
+	const sourceScroll = new Gtk.ScrolledWindow({
+		child: sourceView,
+		heightRequest: 260,
+		hscrollbarPolicy: Gtk.PolicyType.AUTOMATIC,
+		vscrollbarPolicy: Gtk.PolicyType.AUTOMATIC,
+	});
+	const sourceRow = new Adw.PreferencesRow({
+		child: sourceScroll,
+		activatable: false,
+		selectable: false,
+	});
+	const operationErrorIcon = new Gtk.Image({
+		iconName: 'dialog-error-symbolic',
+		cssClasses: ['error'],
+	});
+	const operationRow = new Adw.ActionRow({ title: '自动保存', subtitle: '' });
+	operationRow.addPrefix(operationErrorIcon);
+
+	const group = new Adw.PreferencesGroup({
+		title: '状态动画',
+		description: '只会保存通过完整校验的 JSON；输入有误时当前有效配置保持不变。',
+	});
+	group.add(editorRow);
+	group.add(sourceRow);
+	group.add(operationRow);
+	const view = new StatusAnimationView(
+		group,
+		openEditorButton,
+		resetButton,
+		sourceBuffer,
+		sourceView,
+		operationRow,
+		operationErrorIcon,
+	);
+	view.state = state;
+	return group;
 }
 
 function showShortcutRecorder(

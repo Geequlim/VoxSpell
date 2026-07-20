@@ -5,6 +5,7 @@
 	"type": "module",
 	"sideEffects": false,
 	"exports": {
+		"./atomic-write": "./src/atomic-write.ts",
 		"./asr-provider": "./src/asr-provider.ts",
 		"./config-paths": "./src/config-paths.ts",
 		"./config-schema": "./src/config-schema.ts",

@@ -66,6 +66,11 @@ export class FcitxInputBehaviorClient {
 		);
 	}
 
+	/** 要求 Fcitx 重新读取全部配置，包括插件的状态动画文件。 */
+	async reloadConfig(): Promise<void> {
+		await this.#call('ReloadConfig', GLib.Variant.newTuple([]));
+	}
+
 	/** 直接通过 Fcitx Controller 检查输入法与 addon 能力。 */
 	async getInputMethodDiagnostics(): Promise<InputMethodDiagnostics> {
 		const emptyParameters = GLib.Variant.newTuple([]);

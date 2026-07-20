@@ -17,7 +17,8 @@ const bind = gtk<DesktopState, AppWindowView>();
 const createPage = {
 	overview: (state: DesktopState) => createOverviewPage(state),
 	recognition: (state: DesktopState) => createRecognitionPage(state.config),
-	'input-behavior': (state: DesktopState) => createInputBehaviorPage(state.inputBehavior),
+	'input-behavior': (state: DesktopState) =>
+		createInputBehaviorPage(state.inputBehavior, state.statusAnimation),
 	dictionary: (state: DesktopState) => createDictionaryPage(state.dictionary),
 	'ai-polishing': (state: DesktopState) => createAiPolishingPage(state.config),
 	diagnostics: (state: DesktopState) => createDiagnosticsPage(state),

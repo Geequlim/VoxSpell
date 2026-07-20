@@ -6,6 +6,7 @@ export interface VoxSpellConfigPaths {
 	readonly configFile: string;
 	readonly credentialsFile: string;
 	readonly dictionaryFile: string;
+	readonly statusAnimationFile: string;
 }
 
 /** 按 XDG 约定解析主配置和凭据文件路径。 */
@@ -23,5 +24,6 @@ export function resolveVoxSpellConfigPaths(
 		dictionaryFile:
 			environment.VOXSPELL_DICTIONARY_PATH ||
 			path.join(path.dirname(configFile), 'dictionary.yaml'),
+		statusAnimationFile: path.join(directory, 'status-animation.json'),
 	};
 }
