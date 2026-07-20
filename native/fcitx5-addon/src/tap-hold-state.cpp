@@ -30,12 +30,44 @@ TapHoldTransition transitionTapHold(TapHoldPhase phase, TapHoldEvent event) {
 		case TapHoldEvent::TriggerRepeated:
 			return {phase, TapHoldAction::Swallow};
 		case TapHoldEvent::TriggerReleased:
-			return {TapHoldPhase::Idle, TapHoldAction::ShowSuccess};
+			return {
+				TapHoldPhase::ActiveTriggerRelease,
+				TapHoldAction::ArmReleaseTimer,
+			};
 		case TapHoldEvent::OtherPressed:
 		case TapHoldEvent::Cancelled:
 			return {TapHoldPhase::AwaitingRelease, TapHoldAction::Cancel};
 		case TapHoldEvent::SessionFailed:
 			return {TapHoldPhase::AwaitingRelease, TapHoldAction::None};
+		case TapHoldEvent::Reset:
+			return {TapHoldPhase::Idle, TapHoldAction::Clear};
+		default:
+			break;
+		}
+		break;
+	case TapHoldPhase::ActiveTriggerRelease:
+		switch (event) {
+		case TapHoldEvent::TriggerRepeated:
+			return {TapHoldPhase::Active, TapHoldAction::CancelReleaseTimer};
+		case TapHoldEvent::TriggerReleaseElapsed:
+			return {TapHoldPhase::Idle, TapHoldAction::ShowSuccess};
+		case TapHoldEvent::SessionFailed:
+			return {TapHoldPhase::FailedTriggerRelease, TapHoldAction::None};
+		case TapHoldEvent::Reset:
+			return {TapHoldPhase::Idle, TapHoldAction::Clear};
+		default:
+			break;
+		}
+		break;
+	case TapHoldPhase::FailedTriggerRelease:
+		switch (event) {
+		case TapHoldEvent::TriggerRepeated:
+			return {
+				TapHoldPhase::AwaitingRelease,
+				TapHoldAction::CancelReleaseTimer,
+			};
+		case TapHoldEvent::TriggerReleaseElapsed:
+			return {TapHoldPhase::Idle, TapHoldAction::None};
 		case TapHoldEvent::Reset:
 			return {TapHoldPhase::Idle, TapHoldAction::Clear};
 		default:

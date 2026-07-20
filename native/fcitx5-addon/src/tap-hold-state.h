@@ -6,6 +6,8 @@ enum class TapHoldPhase {
 	Idle,
 	Pending,
 	Active,
+	ActiveTriggerRelease,
+	FailedTriggerRelease,
 	AwaitingRelease,
 };
 
@@ -13,6 +15,7 @@ enum class TapHoldEvent {
 	TriggerPressed,
 	TriggerRepeated,
 	TriggerReleased,
+	TriggerReleaseElapsed,
 	ThresholdElapsed,
 	OtherPressed,
 	Cancelled,
@@ -23,6 +26,8 @@ enum class TapHoldEvent {
 enum class TapHoldAction {
 	None,
 	ArmTimer,
+	ArmReleaseTimer,
+	CancelReleaseTimer,
 	ReplayTrigger,
 	ShowActive,
 	ShowSuccess,

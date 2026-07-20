@@ -67,6 +67,9 @@ develop:
       description: 使用真实 Unix Socket 验证 daemon 闭环
       command: yarn --cwd apps/daemon vitest run test/daemon-runtime.test.ts
       actions:
+        - name: qt-input
+          description: 启动 Qt 输入框验证 Fcitx 按键与语音输入流程
+          command: python native/fcitx5-addon/tools/qt-input-smoke.py
         - name: asr-fixtures
           description: 使用固定 fixtures 请求真实 ASR Provider
           command:

@@ -41,6 +41,7 @@ namespace voxspell {
 namespace {
 
 constexpr char configFile[] = "conf/voxspell.conf";
+constexpr std::uint64_t triggerReleaseGraceUs = 30 * 1000;
 
 FCITX_DEFINE_LOG_CATEGORY(voxspellLog, "voxspell");
 
@@ -81,6 +82,7 @@ public:
 	fcitx::Key triggerRawKey;
 	int triggerPressTime = 0;
 	std::unique_ptr<fcitx::EventSourceTime> holdTimer;
+	std::unique_ptr<fcitx::EventSourceTime> triggerReleaseTimer;
 };
 
 } // namespace
@@ -234,6 +236,15 @@ private:
 			return;
 		}
 
+		if (state->phase == TapHoldPhase::ActiveTriggerRelease ||
+			state->phase == TapHoldPhase::FailedTriggerRelease) {
+			applyTransition(
+				inputContext,
+				*state,
+				TapHoldEvent::TriggerReleaseElapsed,
+				keyEvent.time());
+		}
+
 		if (state->showingError) {
 			state->showingError = false;
 			clearOwnPanel(inputContext);
@@ -332,6 +343,12 @@ private:
 		case TapHoldAction::ArmTimer:
 			armHoldTimer(inputContext, state);
 			break;
+		case TapHoldAction::ArmReleaseTimer:
+			armTriggerReleaseTimer(inputContext, state, eventTime);
+			break;
+		case TapHoldAction::CancelReleaseTimer:
+			state.triggerReleaseTimer.reset();
+			break;
 		case TapHoldAction::ReplayTrigger:
 			state.holdTimer.reset();
 			replayTrigger(inputContext, state, eventTime);
@@ -348,6 +365,7 @@ private:
 			break;
 		case TapHoldAction::Clear:
 			state.holdTimer.reset();
+			state.triggerReleaseTimer.reset();
 			state.showingError = false;
 			cancelVoiceSession(inputContext, "focus-lost");
 			clearOwnPanel(inputContext);
@@ -383,6 +401,37 @@ private:
 				return false;
 			});
 		state.holdTimer->setOneShot();
+	}
+
+	void armTriggerReleaseTimer(
+		fcitx::InputContext *inputContext,
+		InputContextState &state,
+		int releaseTime) {
+		state.triggerReleaseTimer.reset();
+		auto inputContextReference = inputContext->watch();
+		state.triggerReleaseTimer = instance_->eventLoop().addTimeEvent(
+			CLOCK_MONOTONIC,
+			fcitx::now(CLOCK_MONOTONIC) + triggerReleaseGraceUs,
+			0,
+			[this, inputContextReference, releaseTime](
+				fcitx::EventSourceTime *,
+				std::uint64_t) {
+				auto *currentInputContext = inputContextReference.get();
+				if (!currentInputContext) {
+					return false;
+				}
+
+				auto *currentState =
+					currentInputContext->propertyFor(&stateFactory_);
+				currentState->triggerReleaseTimer.reset();
+				applyTransition(
+					currentInputContext,
+					*currentState,
+					TapHoldEvent::TriggerReleaseElapsed,
+					releaseTime);
+				return false;
+			});
+		state.triggerReleaseTimer->setOneShot();
 	}
 
 	void replayTrigger(
@@ -1049,6 +1098,7 @@ private:
 		state->polishingTogglePressed = false;
 		state->swallowedSelectionKey = FcitxKey_None;
 		state->holdTimer.reset();
+		state->triggerReleaseTimer.reset();
 		state->showingError = false;
 		if (updateUi) {
 			clearOwnPanel(inputContext);

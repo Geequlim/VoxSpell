@@ -47,6 +47,11 @@ void testLongHold() {
 	expectTransition(
 		phase,
 		TapHoldEvent::TriggerReleased,
+		TapHoldPhase::ActiveTriggerRelease,
+		TapHoldAction::ArmReleaseTimer);
+	expectTransition(
+		TapHoldPhase::ActiveTriggerRelease,
+		TapHoldEvent::TriggerReleaseElapsed,
 		TapHoldPhase::Idle,
 		TapHoldAction::ShowSuccess);
 }
@@ -95,6 +100,43 @@ void testRepeatedTrigger() {
 		TapHoldAction::Swallow);
 }
 
+void testActiveReleasePressAutoRepeat() {
+	auto phase = expectTransition(
+		TapHoldPhase::Active,
+		TapHoldEvent::TriggerReleased,
+		TapHoldPhase::ActiveTriggerRelease,
+		TapHoldAction::ArmReleaseTimer);
+	expectTransition(
+		phase,
+		TapHoldEvent::TriggerRepeated,
+		TapHoldPhase::Active,
+		TapHoldAction::CancelReleaseTimer);
+}
+
+void testFailureDuringPendingRelease() {
+	auto phase = expectTransition(
+		TapHoldPhase::ActiveTriggerRelease,
+		TapHoldEvent::SessionFailed,
+		TapHoldPhase::FailedTriggerRelease,
+		TapHoldAction::None);
+	expectTransition(
+		phase,
+		TapHoldEvent::TriggerReleaseElapsed,
+		TapHoldPhase::Idle,
+		TapHoldAction::None);
+
+	phase = expectTransition(
+		TapHoldPhase::ActiveTriggerRelease,
+		TapHoldEvent::SessionFailed,
+		TapHoldPhase::FailedTriggerRelease,
+		TapHoldAction::None);
+	expectTransition(
+		phase,
+		TapHoldEvent::TriggerRepeated,
+		TapHoldPhase::AwaitingRelease,
+		TapHoldAction::CancelReleaseTimer);
+}
+
 void testFailureWaitsForTriggerRelease() {
 	auto phase = expectTransition(
 		TapHoldPhase::Active,
@@ -121,6 +163,8 @@ int main() {
 	testRollover();
 	testCancelAndReset();
 	testRepeatedTrigger();
+	testActiveReleasePressAutoRepeat();
+	testFailureDuringPendingRelease();
 	testFailureWaitsForTriggerRelease();
 	return 0;
 }
