@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(voxspell-fcitx5-addon VERSION 0.1.2 LANGUAGES CXX)
+project(voxspell-fcitx5-addon VERSION 0.1.3 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 include(CTest)
