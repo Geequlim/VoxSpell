@@ -21,7 +21,7 @@ asr:
       region: cn-beijing
       context: ""
 textProcessing:
-  trimTrailingPeriod: true
+  trimTrailingPeriod: false
 polishing:
   enabled: true
   minimumEffectiveCharacters: 6

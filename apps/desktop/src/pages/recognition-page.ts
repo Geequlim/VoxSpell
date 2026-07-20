@@ -353,12 +353,12 @@ function showCreateProviderDialog(
 	providerGroup.add(providerTypeRow);
 
 	const errorIcon = new Gtk.Image({ iconName: 'dialog-error-symbolic', cssClasses: ['error'] });
-	const errorRow = new Adw.ActionRow({ title: '无法创建识别服务', subtitle: '', visible: false });
+	const errorRow = new Adw.ActionRow({ title: '无法创建识别服务', subtitle: '' });
 	errorRow.addPrefix(errorIcon);
-	const errorGroup = new Adw.PreferencesGroup();
+	const errorGroup = new Adw.PreferencesGroup({ visible: false });
 	errorGroup.add(errorRow);
 
-	const page = new Adw.PreferencesPage();
+	const page = new Adw.PreferencesPage({ vexpand: true });
 	page.add(providerGroup);
 	const cancelButton = new Gtk.Button({ label: '取消' });
 	const createButton = new Gtk.Button({ label: '创建', cssClasses: ['suggested-action'] });
@@ -377,15 +377,15 @@ function showCreateProviderDialog(
 	});
 	actionBox.append(cancelButton);
 	actionBox.append(createButton);
-	const bottomBox = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL });
 	errorGroup.marginTop = 10;
 	errorGroup.marginStart = 12;
 	errorGroup.marginEnd = 12;
-	bottomBox.append(errorGroup);
-	bottomBox.append(actionBox);
-	const toolbar = new Adw.ToolbarView({ content: page, extendContentToBottomEdge: true });
+	const contentBox = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL });
+	contentBox.append(page);
+	contentBox.append(errorGroup);
+	contentBox.append(actionBox);
+	const toolbar = new Adw.ToolbarView({ content: contentBox });
 	toolbar.addTopBar(header);
-	toolbar.addBottomBar(bottomBox);
 	const dialog = new Adw.Dialog({
 		title: '新建识别服务',
 		child: toolbar,
@@ -397,13 +397,11 @@ function showCreateProviderDialog(
 
 	providerIdRow.on('changed', () => {
 		providerIdRow.title = '服务标识';
-		errorRow.visible = false;
-		toolbar.extendContentToBottomEdge = true;
+		errorGroup.visible = false;
 		state.clearOperationResult();
 	});
 	providerTypeRow.on('notify::selected', () => {
-		errorRow.visible = false;
-		toolbar.extendContentToBottomEdge = true;
+		errorGroup.visible = false;
 		state.clearOperationResult();
 	});
 
@@ -416,8 +414,7 @@ function showCreateProviderDialog(
 	const showError = (): void => {
 		providerIdRow.title = getFieldTitle('服务标识', state.fieldErrors.providerId);
 		errorRow.subtitle = state.operationDescription;
-		errorRow.visible = true;
-		toolbar.extendContentToBottomEdge = false;
+		errorGroup.visible = true;
 	};
 	let created = false;
 	const create = async (): Promise<void> => {
