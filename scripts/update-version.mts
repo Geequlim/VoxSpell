@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createInterface } from 'node:readline/promises';
@@ -5,7 +6,55 @@ import { fileURLToPath } from 'node:url';
 import { stdin, stdout } from 'node:process';
 
 const ROOT_DIRECTORY = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
+const VERSION_PATTERN = /^(\d+)\.(\d+)\.(\d+)$/;
+
+interface RunResult {
+	readonly stderr: string;
+	readonly stdout: string;
+}
+
+async function run(
+	command: string,
+	arguments_: readonly string[],
+	capture = false,
+): Promise<RunResult> {
+	return new Promise<RunResult>((resolve, reject) => {
+		const child = spawn(command, arguments_, {
+			cwd: ROOT_DIRECTORY,
+			stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
+		});
+		let stdout = '';
+		let stderr = '';
+		if (capture) {
+			child.stdout?.setEncoding('utf8');
+			child.stderr?.setEncoding('utf8');
+			child.stdout?.on('data', (chunk: string) => {
+				stdout += chunk;
+			});
+			child.stderr?.on('data', (chunk: string) => {
+				stderr += chunk;
+			});
+		}
+		child.on('error', reject);
+		child.on('exit', (code: number) => {
+			if (code === 0) {
+				resolve({ stdout, stderr });
+				return;
+			}
+			const detail = capture ? `\n${stderr || stdout}` : '';
+			reject(new Error(`${command} ${arguments_.join(' ')} 失败，退出码 ${code}${detail}`));
+		});
+	});
+}
+
+async function commandSucceeds(command: string, arguments_: readonly string[]): Promise<boolean> {
+	try {
+		await run(command, arguments_, true);
+		return true;
+	} catch {
+		return false;
+	}
+}
 
 async function getPackageFiles(): Promise<string[]> {
 	const files = [path.join(ROOT_DIRECTORY, 'package.json')];
@@ -27,8 +76,8 @@ function replacePackageVersion(source: string, version: string, filePath: string
 	return source.replace(pattern, `$1${version}$2`);
 }
 
-async function updateVersion(version: string): Promise<void> {
-	if (!VERSION_PATTERN.test(version)) {
+async function updateVersion(version: string): Promise<readonly string[]> {
+	if (!parseVersion(version)) {
 		throw new Error(`版本号必须是 x.y.z 格式，例如 0.2.0：${version}`);
 	}
 
@@ -50,9 +99,7 @@ async function updateVersion(version: string): Promise<void> {
 	await Promise.all(changes.map(({ filePath, source }) => writeFile(filePath, source)));
 	await writeFile(cmakePath, cmakeUpdated);
 	console.log(`已将 ${changes.length + 1} 个版本字段更新为 ${version}`);
-	console.log(`建议提交版本修改后创建 Git tag：v${version}`);
-	console.log(`git tag v${version}`);
-	console.log(`git push origin v${version}`);
+	return [...packageFiles, cmakePath];
 }
 
 async function getCurrentVersion(): Promise<string> {
@@ -77,13 +124,74 @@ async function readVersionArgument(): Promise<string | undefined> {
 	}
 }
 
-const version = await readVersionArgument();
+function parseVersion(version: string): readonly [number, number, number] | undefined {
+	const match = VERSION_PATTERN.exec(version);
+	if (!match) return undefined;
+	return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+function compareVersions(left: string, right: string): number {
+	const leftParts = parseVersion(left);
+	const rightParts = parseVersion(right);
+	if (!leftParts || !rightParts) throw new Error('版本号必须是 x.y.z 格式');
+	for (let index = 0; index < leftParts.length; index += 1) {
+		if (leftParts[index] !== rightParts[index]) {
+			return leftParts[index]! > rightParts[index]! ? 1 : -1;
+		}
+	}
+	return 0;
+}
+
+async function ensureCleanWorktree(): Promise<void> {
+	const { stdout } = await run('git', ['status', '--porcelain'], true);
+	if (stdout.trim()) throw new Error('版本操作前工作区必须保持干净，请先提交或处理现有改动');
+}
+
+async function ensureTagAvailable(tag: string): Promise<void> {
+	if (await commandSucceeds('git', ['rev-parse', '--verify', `refs/tags/${tag}`])) {
+		throw new Error(`${tag} 已存在本地，自动流程不会覆盖已有 tag`);
+	}
+	if (await commandSucceeds('git', ['ls-remote', '--exit-code', 'origin', `refs/tags/${tag}`])) {
+		throw new Error(`${tag} 已存在于 origin，自动流程不会覆盖已有 tag`);
+	}
+}
+
+async function getCurrentBranch(): Promise<string> {
+	const { stdout } = await run('git', ['branch', '--show-current'], true);
+	const branch = stdout.trim();
+	if (!branch) throw new Error('当前处于 detached HEAD，无法自动推送当前分支');
+	return branch;
+}
+
+const version = (await readVersionArgument())?.trim();
 if (!version) {
 	console.error('用法：node scripts/update-version.mts <x.y.z>');
 	process.exitCode = 2;
 } else {
-	await updateVersion(version).catch((error) => {
+	try {
+		const currentVersion = await getCurrentVersion();
+		if (compareVersions(version, currentVersion) <= 0) {
+			throw new Error(`新版本 ${version} 必须高于当前版本 ${currentVersion}`);
+		}
+		await ensureCleanWorktree();
+		const tag = `v${version}`;
+		await ensureTagAvailable(tag);
+		const branch = await getCurrentBranch();
+		const files = await updateVersion(version);
+		const relativeFiles = files.map((filePath) => path.relative(ROOT_DIRECTORY, filePath));
+		await run('git', ['add', '--', ...relativeFiles]);
+		await run('git', ['commit', '-m', `chore: 更新所有包的版本号至 ${version}`]);
+		await run('git', ['tag', tag]);
+		await run('git', [
+			'push',
+			'--atomic',
+			'origin',
+			`HEAD:refs/heads/${branch}`,
+			`refs/tags/${tag}`,
+		]);
+		console.log(`已提交并推送 ${branch} 与 ${tag}`);
+	} catch (error) {
 		console.error(error instanceof Error ? error.message : error);
 		process.exitCode = 1;
-	});
+	}
 }
