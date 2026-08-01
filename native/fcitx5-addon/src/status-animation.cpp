@@ -75,7 +75,7 @@ StatusAnimationConfig defaultStatusAnimationConfig() {
 			.name = "润色中",
 			.frames = {"✨", "🌟", "💫", "🌟", "✨"},
 			.text = "正在润色",
-			.hint = "请稍候",
+			.hint = "2 提交识别结果",
 			.interval = 420,
 		},
 		{

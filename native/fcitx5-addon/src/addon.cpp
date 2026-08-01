@@ -507,6 +507,14 @@ private:
 			clearOwnPanel(inputContext);
 			return true;
 		}
+		if (keyEvent.key().check(FcitxKey_2) &&
+			isPolishing() && transcriptResult_ &&
+			!selectionRequested_) {
+			state.swallowedSelectionKey = keyEvent.key().sym();
+			keyEvent.filterAndAccept();
+			selectResult("transcript");
+			return true;
+		}
 		if (config_.autoSelectResult.value() || !transcriptResult_ ||
 			!hasManualChoice()) {
 			if (!keyEvent.key().isModifier()) {
@@ -765,7 +773,8 @@ private:
 	}
 
 	void renderResults(fcitx::InputContext *inputContext) {
-		if (config_.autoSelectResult.value()) {
+		const bool polishing = isPolishing();
+		if (!polishing && config_.autoSelectResult.value()) {
 			const protocol::PolishedResult *visibleResult = nullptr;
 			if (polishedResult_) {
 				visibleResult = &*polishedResult_;
@@ -777,12 +786,9 @@ private:
 					std::vector<std::string>{visibleResult->text});
 				candidates->setCursorIndex(0);
 				candidates->setLayoutHint(fcitx::CandidateLayoutHint::Vertical);
-				const auto stageId = selectionRequested_
-					? std::string_view("submitting")
-					: std::string_view("polishing");
 				setAnimatedVoicePanel(
 					inputContext,
-					stageId,
+					"polishing",
 					{},
 					std::move(candidates));
 				return;
@@ -806,7 +812,7 @@ private:
 				nullptr);
 			return;
 		}
-		if (!hasManualChoice()) {
+		if (!polishing && !hasManualChoice()) {
 			auto candidates = std::make_unique<fcitx::DisplayOnlyCandidateList>();
 			candidates->setContent(
 				std::vector<std::string>{transcriptResult_->text});
@@ -842,10 +848,15 @@ private:
 		candidates->setCursorIndex(selectedChoiceId_ == "transcript" ? 1 : 0);
 		setAnimatedVoicePanel(
 			inputContext,
-			selectionRequested_ ? std::string_view("submitting")
-								: std::string_view("choosing"),
+			polishing ? std::string_view("polishing")
+							: std::string_view("choosing"),
 			{},
 			std::move(candidates));
+	}
+
+	bool isPolishing() const {
+		return sessionPhase_ == "polishing" ||
+			(polishingEnabled_ && transcriptResult_ && !recommendedChoiceId_);
 	}
 
 	bool hasManualChoice() const {
