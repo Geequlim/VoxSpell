@@ -953,6 +953,13 @@ private:
 		transcriptResult_ = params.transcript;
 		polishedResult_ = params.polished;
 		recommendedChoiceId_ = params.recommendedChoiceId;
+		const bool polishedMatchesTranscript =
+			polishedResult_ && polishedResult_->status == "final" &&
+			polishedResult_->text == transcriptResult_->text;
+		if (!selectionRequested_ && polishedMatchesTranscript) {
+			selectResult("transcript");
+			return;
+		}
 		renderResults(inputContext);
 
 		if (!config_.autoSelectResult.value() || selectionRequested_ ||
