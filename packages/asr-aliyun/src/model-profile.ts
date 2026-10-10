@@ -1,4 +1,6 @@
 export type AliyunAsrModel =
+	| 'qwen-audio-3.1-asr-flash-streaming'
+	| 'qwen-audio-3.0-asr-flash-streaming'
 	| 'fun-asr-realtime'
 	| 'paraformer-realtime-v2'
 	| 'qwen3-asr-flash-realtime';
@@ -98,6 +100,26 @@ const PARAFORMER_LANGUAGES: readonly AliyunLanguage[] = [
 
 export const ALIYUN_ASR_MODEL_PROFILES: readonly AliyunAsrModelProfile[] = [
 	{
+		id: 'qwen-audio-3.1-asr-flash-streaming',
+		title: 'Qwen-Audio 3.1 Flash 实时识别（推荐）',
+		protocol: 'dashscope-duplex',
+		regions: ['cn-beijing', 'ap-southeast-1'],
+		languages: FUN_LANGUAGES,
+		supportsVocabulary: true,
+		supportsContext: true,
+		supportsTimestamps: true,
+	},
+	{
+		id: 'qwen-audio-3.0-asr-flash-streaming',
+		title: 'Qwen-Audio 3.0 Flash 实时识别',
+		protocol: 'dashscope-duplex',
+		regions: ['cn-beijing', 'ap-southeast-1'],
+		languages: FUN_LANGUAGES,
+		supportsVocabulary: true,
+		supportsContext: true,
+		supportsTimestamps: true,
+	},
+	{
 		id: 'fun-asr-realtime',
 		title: 'Fun-ASR 实时识别',
 		protocol: 'dashscope-duplex',
@@ -119,7 +141,7 @@ export const ALIYUN_ASR_MODEL_PROFILES: readonly AliyunAsrModelProfile[] = [
 	},
 	{
 		id: 'qwen3-asr-flash-realtime',
-		title: 'Qwen3-ASR Flash 实时识别',
+		title: 'Qwen3-ASR Flash 实时识别（旧版）',
 		protocol: 'qwen-realtime',
 		regions: ['cn-beijing', 'ap-southeast-1'],
 		languages: QWEN_LANGUAGES,

@@ -146,7 +146,12 @@ describe('VoxSpell config', () => {
 		});
 	});
 
-	it('resolves Aliyun realtime settings and its fixed API key credential', () => {
+	it.each([
+		'qwen-audio-3.1-asr-flash-streaming',
+		'qwen-audio-3.0-asr-flash-streaming',
+		'fun-asr-realtime',
+		'qwen3-asr-flash-realtime',
+	])('resolves Aliyun model %s and its fixed API key credential', (model) => {
 		const config = parseVoxSpellConfig({
 			version: 1,
 			asr: {
@@ -155,7 +160,7 @@ describe('VoxSpell config', () => {
 					{
 						id: 'aliyun',
 						type: 'aliyun-realtime',
-						model: 'fun-asr-realtime',
+						model,
 						region: 'cn-beijing',
 						language: 'zh',
 						context: 'VoxSpell',
@@ -173,7 +178,7 @@ describe('VoxSpell config', () => {
 			id: 'aliyun',
 			type: 'aliyun-realtime',
 			apiKey: 'secret',
-			model: 'fun-asr-realtime',
+			model,
 			region: 'cn-beijing',
 			workspaceId: 'workspace',
 			language: 'zh',

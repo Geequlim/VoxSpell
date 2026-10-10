@@ -36,6 +36,8 @@ export const AliyunRealtimeProviderConfigSchema = Type.Object(
 		id: Type.String({ minLength: 1 }),
 		type: Type.Literal('aliyun-realtime'),
 		model: Type.Union([
+			Type.Literal('qwen-audio-3.1-asr-flash-streaming'),
+			Type.Literal('qwen-audio-3.0-asr-flash-streaming'),
 			Type.Literal('fun-asr-realtime'),
 			Type.Literal('paraformer-realtime-v2'),
 			Type.Literal('qwen3-asr-flash-realtime'),

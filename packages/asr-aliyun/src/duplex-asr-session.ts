@@ -25,6 +25,7 @@ interface DashScopeMessage {
 		readonly output?: {
 			readonly sentence?: {
 				readonly sentence_id?: number | string;
+				readonly heartbeat?: boolean;
 				readonly text?: string;
 				readonly sentence_end?: boolean;
 				readonly begin_time?: number;
@@ -34,7 +35,7 @@ interface DashScopeMessage {
 	};
 }
 
-/** Fun-ASR 与 Paraformer 共用的 DashScope 双工协议会话。 */
+/** Qwen-Audio、Fun-ASR 与 Paraformer 共用的 DashScope 双工协议会话。 */
 export class AliyunDuplexAsrSession extends AliyunWebSocketSession {
 	readonly #options: DuplexAsrSessionOptions;
 	readonly #taskId = randomUUID();
@@ -55,6 +56,16 @@ export class AliyunDuplexAsrSession extends AliyunWebSocketSession {
 			sample_rate: 16_000,
 			semantic_punctuation_enabled: true,
 		};
+		if (
+			this.#options.model === 'qwen-audio-3.1-asr-flash-streaming' ||
+			this.#options.model === 'qwen-audio-3.0-asr-flash-streaming'
+		) {
+			parameters.semantic_punctuation_enabled = false;
+			parameters.max_sentence_silence = 400;
+		}
+		if (this.#options.model === 'qwen-audio-3.1-asr-flash-streaming') {
+			parameters.vad_model = 'near_meeting_16k';
+		}
 		if (this.#options.model === 'paraformer-realtime-v2') {
 			parameters.disfluency_removal_enabled = false;
 			parameters.punctuation_prediction_enabled = true;
@@ -142,7 +153,13 @@ export class AliyunDuplexAsrSession extends AliyunWebSocketSession {
 
 	#handleResult(message: DashScopeMessage): void {
 		const sentence = message.payload?.output?.sentence;
-		if (!sentence || sentence.sentence_id === undefined || sentence.text === undefined) return;
+		if (
+			!sentence ||
+			sentence.heartbeat ||
+			sentence.sentence_id === undefined ||
+			sentence.text === undefined
+		)
+			return;
 		const id = String(sentence.sentence_id);
 		if (sentence.sentence_end) {
 			this.#segments.set(id, sentence.text);

@@ -1,4 +1,4 @@
-import type { VoxSpellConfig } from './config-schema.js';
+import type { AliyunRealtimeProviderConfig, VoxSpellConfig } from './config-schema.js';
 
 export interface ResolvedOpenAiCompatibleTranscriptionProvider {
 	readonly id: string;
@@ -21,7 +21,7 @@ export interface ResolvedAliyunRealtimeProvider {
 	readonly id: string;
 	readonly type: 'aliyun-realtime';
 	readonly apiKey: string;
-	readonly model: 'fun-asr-realtime' | 'paraformer-realtime-v2' | 'qwen3-asr-flash-realtime';
+	readonly model: AliyunRealtimeProviderConfig['model'];
 	readonly region: 'cn-beijing' | 'ap-southeast-1';
 	readonly workspaceId: string;
 	readonly language?: string;

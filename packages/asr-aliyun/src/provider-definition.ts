@@ -27,7 +27,7 @@ export const aliyunRealtimeAsrDefinition: AsrProviderDefinition = {
 	createDefaultConfig: (providerId) => ({
 		id: providerId,
 		type: 'aliyun-realtime',
-		model: 'fun-asr-realtime',
+		model: 'qwen-audio-3.1-asr-flash-streaming',
 		region: 'cn-beijing',
 		context: '',
 	}),

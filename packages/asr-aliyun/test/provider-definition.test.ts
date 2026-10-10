@@ -10,7 +10,7 @@ describe('aliyunRealtimeAsrDefinition', () => {
 		expect(provider).toEqual({
 			id: 'aliyun',
 			type: 'aliyun-realtime',
-			model: 'fun-asr-realtime',
+			model: 'qwen-audio-3.1-asr-flash-streaming',
 			region: 'cn-beijing',
 			context: '',
 		});
@@ -19,6 +19,15 @@ describe('aliyunRealtimeAsrDefinition', () => {
 			['region', 'choice'],
 			['language', 'choice'],
 			['context', 'text'],
+		]);
+		expect(
+			fields.find((field) => field.id === 'model')?.choices?.map((choice) => choice.value),
+		).toEqual([
+			'qwen-audio-3.1-asr-flash-streaming',
+			'qwen-audio-3.0-asr-flash-streaming',
+			'fun-asr-realtime',
+			'paraformer-realtime-v2',
+			'qwen3-asr-flash-realtime',
 		]);
 		expect(fields.find((field) => field.id === 'language')?.choices?.[0]).toEqual({
 			value: '',

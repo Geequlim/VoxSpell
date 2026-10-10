@@ -13,7 +13,11 @@ import type { AsrEvent, RealtimeAsrSession } from '@voxspell/asr-core/realtime-a
 const SESSION_ID = '0198a791-f212-7d8b-a856-63eea0720d4c';
 
 describe('Aliyun realtime sessions', () => {
-	it('publishes duplicate-free duplex previews when sentence ids change', async () => {
+	it.each([
+		'fun-asr-realtime',
+		'qwen-audio-3.1-asr-flash-streaming',
+		'qwen-audio-3.0-asr-flash-streaming',
+	] as const)('publishes duplicate-free duplex previews for %s', async (model) => {
 		let runTask: Record<string, unknown> | undefined;
 		const server = await createServer((socket) => {
 			socket.on('message', (data, isBinary) => {
@@ -27,6 +31,14 @@ describe('Aliyun realtime sessions', () => {
 					return;
 				}
 				socket.send(createDuplexResult(1, false, '你号'));
+				socket.send(
+					JSON.stringify({
+						header: { event: 'result-generated' },
+						payload: {
+							output: { sentence: { sentence_id: 0, text: '', heartbeat: true } },
+						},
+					}),
+				);
 				socket.send(createDuplexResult(2, false, '你好'));
 				socket.send(createDuplexResult(2, true, '你好'));
 				socket.send(JSON.stringify({ header: { event: 'task-finished' }, payload: {} }));
@@ -38,7 +50,7 @@ describe('Aliyun realtime sessions', () => {
 				session: { sessionId: SESSION_ID },
 				url: getServerUrl(server),
 				headers: {},
-				model: 'fun-asr-realtime',
+				model,
 				language: 'zh',
 				context: 'VoxSpell',
 				vocabularyId: 'vocab-1',
@@ -56,6 +68,7 @@ describe('Aliyun realtime sessions', () => {
 			]);
 			expect(runTask).toMatchObject({
 				payload: {
+					model,
 					parameters: {
 						language_hints: ['zh'],
 						vocabulary_id: 'vocab-1',
@@ -67,6 +80,23 @@ describe('Aliyun realtime sessions', () => {
 					},
 				},
 			});
+			if (model !== 'fun-asr-realtime') {
+				expect(runTask).toMatchObject({
+					payload: {
+						parameters: {
+							format: 'pcm',
+							sample_rate: 16_000,
+							semantic_punctuation_enabled: false,
+							max_sentence_silence: 400,
+						},
+					},
+				});
+			}
+			if (model === 'qwen-audio-3.1-asr-flash-streaming') {
+				expect(runTask).toMatchObject({
+					payload: { parameters: { vad_model: 'near_meeting_16k' } },
+				});
+			}
 		} finally {
 			await closeServer(server);
 		}

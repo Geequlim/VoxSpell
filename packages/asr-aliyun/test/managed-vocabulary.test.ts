@@ -1,11 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import type { AliyunAsrModel } from '../src/model-profile.js';
+
 import { ManagedAliyunVocabulary } from '../src/managed-vocabulary.js';
 
 describe('ManagedAliyunVocabulary', () => {
 	afterEach(() => vi.unstubAllGlobals());
 
-	it('creates an internal vocabulary from valid VoxSpell terms', async () => {
+	it.each([
+		'fun-asr-realtime',
+		'qwen-audio-3.1-asr-flash-streaming',
+		'qwen-audio-3.0-asr-flash-streaming',
+	] as const)('creates a vocabulary targeting %s from valid VoxSpell terms', async (model) => {
 		const request = vi.fn().mockResolvedValue(
 			new Response(JSON.stringify({ output: { vocabulary_id: 'vocab-1' } }), {
 				status: 200,
@@ -13,7 +19,7 @@ describe('ManagedAliyunVocabulary', () => {
 			}),
 		);
 		vi.stubGlobal('fetch', request);
-		const vocabulary = createVocabulary();
+		const vocabulary = createVocabulary(undefined, model);
 
 		await expect(
 			vocabulary.resolve([
@@ -25,7 +31,7 @@ describe('ManagedAliyunVocabulary', () => {
 			model: 'speech-biasing',
 			input: {
 				action: 'create_vocabulary',
-				target_model: 'fun-asr-realtime',
+				target_model: model,
 				vocabulary: [{ text: 'VoxSpell', weight: 5 }],
 			},
 		});
@@ -43,13 +49,16 @@ describe('ManagedAliyunVocabulary', () => {
 	});
 });
 
-function createVocabulary(reportFailure?: () => void): ManagedAliyunVocabulary {
+function createVocabulary(
+	reportFailure?: () => void,
+	model: AliyunAsrModel = 'fun-asr-realtime',
+): ManagedAliyunVocabulary {
 	return new ManagedAliyunVocabulary({
 		providerId: 'aliyun',
 		apiKey: 'secret',
 		workspaceId: 'workspace',
 		domain: 'workspace.cn-beijing.maas.aliyuncs.com',
-		model: 'fun-asr-realtime',
+		model,
 		reportFailure,
 	});
 }

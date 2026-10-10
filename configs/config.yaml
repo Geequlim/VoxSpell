@@ -17,7 +17,7 @@ asr:
       engineModelType: 16k_zh
     - id: 阿里云百炼
       type: aliyun-realtime
-      model: fun-asr-realtime
+      model: qwen-audio-3.1-asr-flash-streaming
       region: cn-beijing
       context: ""
 textProcessing:
